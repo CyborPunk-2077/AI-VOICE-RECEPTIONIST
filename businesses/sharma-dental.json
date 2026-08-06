@@ -1,0 +1,124 @@
+{
+  "slug": "sharma-dental",
+
+  "profile": {
+    "name": "Sharma Dental Care",
+    "type": "dental clinic",
+    "tagline": "Family dentistry in Malviya Nagar since 2012",
+    "city": "Jaipur",
+    "address": "Shop 14, Malviya Nagar, Jaipur, Rajasthan 302017",
+    "landmark": "opposite the Axis Bank ATM",
+    "publicPhone": "+911412345678",
+    "timezone": "Asia/Kolkata",
+    "currency": "INR",
+    "languages": ["hi", "en"]
+  },
+
+  "agent": {
+    "name": "Priya",
+    "role": "receptionist",
+    "persona": "warm, patient, and efficient; never rushes an anxious caller",
+    "greeting": "",
+    "maxCallMinutes": 6
+  },
+
+  "hours": {
+    "monday": { "open": "10:00", "close": "20:00" },
+    "tuesday": { "open": "10:00", "close": "20:00" },
+    "wednesday": { "open": "10:00", "close": "20:00" },
+    "thursday": { "open": "10:00", "close": "20:00" },
+    "friday": { "open": "10:00", "close": "20:00" },
+    "saturday": { "open": "10:00", "close": "18:00" },
+    "sunday": null,
+    "breaks": [{ "start": "14:00", "end": "15:00", "label": "lunch" }],
+    "closedDates": []
+  },
+
+  "offerings": [
+    {
+      "name": "Consultation",
+      "aliases": ["checkup", "check up", "jaanch", "dikhana hai"],
+      "price": 300,
+      "priceType": "exact",
+      "durationMinutes": 20,
+      "bookable": true,
+      "notes": "Waived if you go ahead with treatment the same day."
+    },
+    {
+      "name": "Teeth Cleaning",
+      "aliases": ["scaling", "polishing", "safai"],
+      "price": 1200,
+      "priceType": "exact",
+      "durationMinutes": 30,
+      "bookable": true
+    },
+    {
+      "name": "Root Canal",
+      "aliases": ["rct"],
+      "price": 5000,
+      "priceType": "from",
+      "durationMinutes": 60,
+      "bookable": true,
+      "notes": "Final cost depends on which tooth and how many sittings are needed."
+    },
+    {
+      "name": "Braces",
+      "aliases": ["aligners", "teeth straightening"],
+      "price": null,
+      "priceType": "on_request",
+      "bookable": false,
+      "notes": "Needs an in-person assessment before anyone can quote a price."
+    }
+  ],
+
+  "faqs": [
+    {
+      "q": "Do you have parking?",
+      "a": "Yes — free two-wheeler parking right outside, and paid four-wheeler parking in the basement."
+    },
+    {
+      "q": "Do you accept insurance or cashless?",
+      "a": "We accept cash, UPI, and all major cards. We're not on cashless insurance panels yet, but we give a proper invoice you can claim with."
+    },
+    {
+      "q": "Is Dr. Sharma available on Sundays?",
+      "a": "The clinic is closed on Sundays. Dr. Sharma sees patients Monday to Saturday."
+    },
+    {
+      "q": "Do I need an appointment or can I just walk in?",
+      "a": "Walk-ins are welcome, but appointments get priority and you'll wait a lot less — especially evenings after 6."
+    }
+  ],
+
+  "policies": {
+    "canQuotePrices": true,
+    "canBook": true,
+    "canCancel": false,
+    "neverDiscuss": [
+      "medical advice, diagnosis, or what a caller's symptoms might mean",
+      "guaranteed treatment outcomes or success rates",
+      "comparisons with other clinics or doctors"
+    ],
+    "extraRules": [
+      "If someone describes severe pain, heavy bleeding, facial swelling, or an accident, tell them to come in right away or go to the nearest emergency room. Do not try to assess how serious it is.",
+      "Never suggest medicines, painkillers, or dosages — not even common ones."
+    ]
+  },
+
+  "escalation": {
+    "transferNumber": "+919876543210",
+    "transferPolicy": "business_hours_only",
+    "triggers": [
+      "caller explicitly asks for a human, the doctor, or Dr. Sharma",
+      "caller is upset, angry, or making a complaint",
+      "anything involving a refund or a billing dispute",
+      "a medical or safety emergency"
+    ]
+  },
+
+  "capture": {
+    "askFor": ["name", "phone", "reason"],
+    "notifyEmail": "",
+    "notifyWhatsapp": ""
+  }
+}

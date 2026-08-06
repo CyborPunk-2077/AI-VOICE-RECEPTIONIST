@@ -1,0 +1,557 @@
+{
+  "name": "ReceptionFlow - create_callback_request",
+  "nodes": [
+    {
+      "id": "4e6e90cc-e09f-47f8-ba1a-247bb00efefa",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1100,
+        -320
+      ],
+      "parameters": {
+        "width": 780,
+        "height": 240,
+        "content": "## create_callback_request (new)\n`POST /webhook/create-callback-request`\n\n**Body:** `business_id`, `customer_name`, `phone`, `reason`, `preferred_callback_time` (optional)\n\nThe fallback path whenever booking is disabled, a service isn't bookable, get_availability can't find a workable time, or availability isn't tracked for this business at all. Writes to `callback_requests`, scoped to the resolved business -- this never creates an appointment or a calendar event. There is no real notification channel wired up yet (see docs/n8n-setup.md); `callback_number`/`callback_notify_channel` are returned as this business's stated preference, not a confirmation that anything was sent."
+      }
+    },
+    {
+      "id": "34ad56ad-5cf3-4a1d-bb34-d69d6667f467",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1060,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-callback-request",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "webhookId": "create-callback-request-placeholder",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_N8N_GATEWAY_HEADER_AUTH_CREDENTIAL",
+          "name": "ReceptionFlow Gateway Shared Secret (placeholder)"
+        }
+      }
+    },
+    {
+      "id": "d0428daa-ac2a-4938-82b5-f766f9f9484b",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -840,
+        0
+      ],
+      "parameters": {
+        "jsCode": "function normalizePhone(raw) {\n  const digits = String(raw || '').replace(/\\D/g, '');\n  if (digits.length < 7 || digits.length > 15) return null;\n  return '+' + digits;\n}\n\n// create_callback_request — Validate Input\nconst body = $input.first().json.body || {};\n\nconst businessId = String(body.business_id ?? '').trim();\nconst customerName = String(body.customer_name ?? body.name ?? '').trim();\nconst rawPhone = String(body.phone ?? body.customer_phone ?? '').trim();\nconst reason = String(body.reason ?? '').trim();\nconst preferredCallbackTime = String(body.preferred_callback_time ?? '').trim() || null;\n\nconst errors = [];\nif (!businessId) errors.push('business_id is required');\nif (!customerName) errors.push('customer_name is required');\n\nconst phoneE164 = normalizePhone(rawPhone);\nif (!rawPhone) {\n  errors.push('phone is required');\n} else if (!phoneE164) {\n  errors.push('phone must contain 7-15 digits, including country code');\n}\n\nif (!reason) errors.push('reason is required');\n\nreturn [{\n  json: {\n    valid: errors.length === 0,\n    errors,\n    business_id_input: businessId,\n    customer_name: customerName,\n    phone_e164: phoneE164,\n    reason,\n    preferred_callback_time: preferredCallbackTime,\n  },\n}];"
+      }
+    },
+    {
+      "id": "6150b5eb-1be8-49d3-a5f4-fb5dfce4010f",
+      "name": "IF Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -620,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "417a137d-cfdc-4ba9-a5df-27440a28f476",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "dda7357b-1851-4f81-874f-20c6430374be",
+      "name": "Respond 400 Invalid Input",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -400,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"invalid_input\", \"status\": \"not_received\", \"received\": false, \"callback_id\": null, \"message\": \"The callback request was missing or malformed fields.\", \"details\": $json.errors } }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "a0683d28-7c79-4bb4-936c-17d686007dde",
+      "name": "Get Business",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/businesses",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id"
+            },
+            {
+              "name": "business_slug",
+              "value": "={{ \"eq.\" + $json.business_id_input }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "96959215-8d4f-4286-835f-a313262ad554",
+      "name": "Respond 502 Supabase Unavailable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -180,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"supabase_unavailable\", \"status\": \"not_received\", \"received\": false, \"callback_id\": null, \"message\": \"Could not reach Supabase, so no callback request was recorded.\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "b1ab2597-ad80-4cb3-b17c-998752edc47f",
+      "name": "Normalize Business",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\nreturn [{ json: { business_found: !!row, business_id: row ? row.id : null } }];"
+      }
+    },
+    {
+      "id": "70c3eaf6-e91f-4511-b7bb-41d3795961c1",
+      "name": "IF Business Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        40,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c5744dd0-dc0a-468f-843e-22191afa9642",
+              "leftValue": "={{ $json.business_found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "438d5586-152c-431f-9fd9-daab35fc521e",
+      "name": "Respond 404 Unknown Business",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        260,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"unknown_business\", \"status\": \"not_received\", \"received\": false, \"callback_id\": null, \"message\": \"No business is registered with that business_id.\" } }}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    },
+    {
+      "id": "d422dc88-2c6c-408a-86a0-ae6a2f489f18",
+      "name": "Get Business Settings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/business_settings",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "callback_number,callback_notify_channel"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ \"eq.\" + $('Normalize Business').first().json.business_id }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "036bd524-2e30-483f-8dc0-939cbb3dc621",
+      "name": "Insert Callback Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        -60
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/callback_requests",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"business_id\": $('Normalize Business').first().json.business_id, \"customer_name\": $('Validate Input').first().json.customer_name, \"customer_phone\": $('Validate Input').first().json.phone_e164, \"reason\": $('Validate Input').first().json.reason, \"preferred_callback_time\": $('Validate Input').first().json.preferred_callback_time, \"status\": \"Pending\" } }}",
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "66ebcecb-6843-471a-819e-e5f583e656f4",
+      "name": "Verify Saved",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// create_callback_request — Verify Saved\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\n\nlet notifyChannel = 'none';\ntry {\n  const settings = $('Get Business Settings').first().json;\n  notifyChannel = settings && settings.callback_notify_channel ? settings.callback_notify_channel : 'none';\n} catch (e) {\n  notifyChannel = 'none';\n}\n\nconst input = $('Validate Input').first().json;\n\nreturn [{\n  json: {\n    saved: !!row,\n    response_ok: {\n      callback_id: row ? row.id : null,\n      status: 'received',\n      received: !!row,\n      business_id: input.business_id_input,\n      customer_name: input.customer_name,\n      customer_phone: input.phone_e164,\n      reason: input.reason,\n      preferred_callback_time: input.preferred_callback_time,\n      notify_channel: notifyChannel,\n      message: 'No real notification channel is wired up yet (see docs/n8n-setup.md); this is recorded as a pending callback for the business to review.',\n    },\n  },\n}];"
+      }
+    },
+    {
+      "id": "6983750d-e80e-40fb-9db0-0af095dd3f8e",
+      "name": "IF Saved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        920,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f22c4175-0f1f-4c89-9fcf-1bc7a6168aab",
+              "leftValue": "={{ $json.saved }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "9428ef69-faf3-4b84-86e5-d35d64b1ea05",
+      "name": "Respond 200 Received",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1140,
+        -160
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response_ok }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "e82ed7d5-29e0-4e0d-866a-009555e95cb3",
+      "name": "Respond 502 Not Saved",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1140,
+        60
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"callback_not_saved\", \"status\": \"not_received\", \"received\": false, \"callback_id\": null, \"message\": \"The callback request could not be written to Supabase.\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "IF Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Valid": {
+      "main": [
+        [
+          {
+            "node": "Get Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400 Invalid Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business": {
+      "main": [
+        [
+          {
+            "node": "Normalize Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Business": {
+      "main": [
+        [
+          {
+            "node": "IF Business Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Business Found": {
+      "main": [
+        [
+          {
+            "node": "Get Business Settings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 404 Unknown Business",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business Settings": {
+      "main": [
+        [
+          {
+            "node": "Insert Callback Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Callback Request": {
+      "main": [
+        [
+          {
+            "node": "Verify Saved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Verify Saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Saved": {
+      "main": [
+        [
+          {
+            "node": "IF Saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Saved": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 Received",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Not Saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "REPLACE_ON_IMPORT"
+  },
+  "tags": []
+}

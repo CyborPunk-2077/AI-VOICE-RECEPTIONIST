@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ReceptionFlow — Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0b0f; --surface:#12141b; --surface-2:#181b24; --surface-3:#1f232e;
+  --line:#262b38; --line-2:#333a4a;
+  --text:#eef1f7; --text-2:#a6aec1; --text-3:#6b7385;
+  --brand:#6366f1; --brand-2:#818cf8; --brand-glow:rgba(99,102,241,.28);
+  --ok:#10b981; --ok-bg:rgba(16,185,129,.12);
+  --warn:#f59e0b; --warn-bg:rgba(245,158,11,.12);
+  --err:#ef4444; --err-bg:rgba(239,68,68,.12);
+  --saffron:#ff9933; --green:#138808;
+  --r:14px; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -8px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:Inter,system-ui,-apple-system,sans-serif; font-size:14px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+  background-image:radial-gradient(900px 500px at 12% -8%,rgba(99,102,241,.10),transparent 60%),
+                   radial-gradient(700px 400px at 92% 0%,rgba(255,153,51,.06),transparent 55%);
+  background-attachment:fixed; min-height:100vh;
+}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:5px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- shell ---------- */
+.topbar{
+  position:sticky; top:0; z-index:50; display:flex; align-items:center; gap:18px;
+  padding:0 26px; height:62px; border-bottom:1px solid var(--line);
+  background:rgba(10,11,15,.82); backdrop-filter:blur(14px) saturate(1.4);
+}
+.brand{display:flex;align-items:center;gap:11px;font-weight:650;letter-spacing:-.02em;font-size:15.5px}
+.logo{
+  width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none;
+  background:linear-gradient(140deg,var(--brand),#a855f7); box-shadow:0 0 0 1px rgba(255,255,255,.09),0 4px 14px var(--brand-glow);
+}
+.logo svg{width:16px;height:16px;stroke:#fff;fill:none;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
+.flag{width:15px;height:11px;border-radius:2px;overflow:hidden;display:flex;flex-direction:column;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.14)}
+.flag i{flex:1}.flag i:nth-child(1){background:var(--saffron)}.flag i:nth-child(2){background:#fff}.flag i:nth-child(3){background:var(--green)}
+.spacer{margin-left:auto}
+
+.picker{position:relative}
+.picker select{
+  appearance:none; background:var(--surface-2); border:1px solid var(--line-2); color:var(--text);
+  padding:8px 34px 8px 13px; border-radius:10px; font:inherit; font-weight:500; cursor:pointer; min-width:210px;
+}
+.picker select:hover{border-color:var(--brand)}
+.picker svg{position:absolute;right:11px;top:50%;transform:translateY(-50%);width:13px;height:13px;stroke:var(--text-3);fill:none;stroke-width:2;pointer-events:none}
+
+.pill{
+  display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:999px;
+  font-size:12px;font-weight:550;background:var(--surface-2);border:1px solid var(--line-2);color:var(--text-2);
+}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--text-3);flex:none}
+.dot.on{background:var(--ok);box-shadow:0 0 0 3px var(--ok-bg)}
+.dot.off{background:var(--err);box-shadow:0 0 0 3px var(--err-bg)}
+.dot.live{background:var(--ok);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}50%{box-shadow:0 0 0 6px rgba(16,185,129,0)}}
+
+/* ---------- layout ---------- */
+.wrap{max-width:1280px;margin:0 auto;padding:26px}
+.tabs{display:flex;gap:3px;margin-bottom:22px;background:var(--surface);padding:4px;border-radius:12px;border:1px solid var(--line);width:fit-content}
+.tab{
+  padding:8px 17px;border-radius:9px;font-size:13.5px;font-weight:550;color:var(--text-2);
+  cursor:pointer;border:0;background:transparent;transition:.16s;white-space:nowrap;
+}
+.tab:hover{color:var(--text)}
+.tab.on{background:var(--surface-3);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.grid{display:grid;gap:18px}
+.g2{grid-template-columns:1fr 1fr}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g-side{grid-template-columns:1.35fr 1fr}
+@media(max-width:1000px){.g2,.g3,.g-side{grid-template-columns:1fr}}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow)}
+.card-h{display:flex;align-items:center;gap:10px;padding:14px 17px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.022),transparent)}
+.card-h h3{font-size:12.5px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-2)}
+.card-b{padding:17px}
+.card-b.tight{padding:0}
+
+/* ---------- stats ---------- */
+.stat{display:flex;flex-direction:column;gap:5px}
+.stat .n{font-size:29px;font-weight:680;letter-spacing:-.03em;line-height:1.1}
+.stat .l{font-size:12.5px;color:var(--text-3);font-weight:500}
+.stat .n.accent{background:linear-gradient(135deg,var(--brand-2),#c084fc);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+
+/* ---------- buttons ---------- */
+button{font-family:inherit}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  padding:9px 15px;border-radius:10px;border:1px solid transparent;
+  background:var(--brand);color:#fff;font-size:13.5px;font-weight:560;cursor:pointer;transition:.16s;
+}
+.btn:hover:not(:disabled){background:var(--brand-2);transform:translateY(-1px);box-shadow:0 5px 16px var(--brand-glow)}
+.btn:active:not(:disabled){transform:translateY(0)}
+.btn:disabled{opacity:.42;cursor:not-allowed}
+.btn.ghost{background:var(--surface-2);border-color:var(--line-2);color:var(--text)}
+.btn.ghost:hover:not(:disabled){background:var(--surface-3);border-color:var(--brand);box-shadow:none;transform:none}
+.btn.danger{background:var(--err)}.btn.danger:hover:not(:disabled){background:#f87171;box-shadow:0 5px 16px rgba(239,68,68,.3)}
+.btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.btn.sm{padding:6px 11px;font-size:12.5px}
+
+/* ---------- forms ---------- */
+.field{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0}
+label{font-size:12px;font-weight:550;color:var(--text-3)}
+input,textarea{
+  background:var(--surface-2);border:1px solid var(--line-2);color:var(--text);
+  padding:9px 12px;border-radius:9px;font:inherit;font-size:13.5px;width:100%;transition:.16s;
+}
+input:focus,textarea:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-glow)}
+input::placeholder{color:var(--text-3)}
+.row{display:flex;gap:11px;align-items:flex-end;flex-wrap:wrap}
+.row+.row{margin-top:12px}
+
+/* ---------- transcript ---------- */
+.convo{display:flex;flex-direction:column;gap:11px;max-height:400px;overflow-y:auto;padding:3px}
+.msg{display:flex;gap:10px;animation:slide .26s ease}
+@keyframes slide{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+.msg .av{width:27px;height:27px;border-radius:8px;display:grid;place-items:center;font-size:11px;font-weight:650;flex:none}
+.msg.agent .av{background:linear-gradient(140deg,var(--brand),#a855f7);color:#fff}
+.msg.caller .av{background:var(--surface-3);color:var(--text-2);border:1px solid var(--line-2)}
+.msg .bub{background:var(--surface-2);border:1px solid var(--line);padding:9px 13px;border-radius:11px;font-size:13.5px;max-width:82%}
+.msg.agent .bub{background:rgba(99,102,241,.09);border-color:rgba(99,102,241,.22)}
+.msg .who{font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
+
+/* ---------- tool result ---------- */
+.res{margin-top:13px;border-radius:11px;overflow:hidden;border:1px solid var(--line-2);animation:slide .26s ease}
+.res-t{padding:11px 14px;font-size:13.5px;font-style:italic;background:var(--surface-2);border-left:3px solid var(--brand)}
+.res.ok .res-t{border-left-color:var(--ok)} .res.no .res-t{border-left-color:var(--warn)}
+.res-m{padding:8px 14px;background:var(--bg);font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--text-3);border-top:1px solid var(--line);overflow-x:auto;white-space:nowrap}
+
+/* ---------- list ---------- */
+.item{padding:13px 17px;border-bottom:1px solid var(--line);transition:.14s}
+.item:last-child{border-bottom:0}
+.item:hover{background:var(--surface-2)}
+.item-h{display:flex;align-items:center;gap:9px;margin-bottom:3px}
+.item-h b{font-weight:600;font-size:13.5px}
+.tel{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--brand-2)}
+.item-s{font-size:12.5px;color:var(--text-2)}
+.item-t{font-size:11.5px;color:var(--text-3);margin-top:3px}
+.empty{padding:34px 20px;text-align:center;color:var(--text-3)}
+.empty svg{width:30px;height:30px;stroke:var(--line-2);fill:none;stroke-width:1.5;margin-bottom:9px}
+.empty p{font-size:13px}
+
+/* ---------- code ---------- */
+pre{
+  background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:15px;
+  overflow:auto;max-height:490px;font-family:'JetBrains Mono',monospace;font-size:12px;
+  line-height:1.65;white-space:pre-wrap;word-break:break-word;color:var(--text-2);
+}
+pre .h{color:var(--brand-2);font-weight:600}
+pre .b{color:var(--text)}
+
+/* ---------- banner ---------- */
+.banner{display:flex;gap:13px;padding:15px 17px;border-radius:var(--r);border:1px solid var(--line);background:var(--surface);margin-bottom:22px;box-shadow:var(--shadow)}
+.banner .ic{width:33px;height:33px;border-radius:9px;display:grid;place-items:center;flex:none;background:var(--warn-bg)}
+.banner .ic svg{width:16px;height:16px;stroke:var(--warn);fill:none;stroke-width:2;stroke-linecap:round}
+.banner b{display:block;margin-bottom:2px;font-size:13.5px;font-weight:600}
+.banner p{font-size:12.8px;color:var(--text-2)}
+.banner code{background:var(--surface-3);padding:1.5px 6px;border-radius:5px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--brand-2)}
+
+/* ---------- misc ---------- */
+.hint{font-size:12.5px;color:var(--text-3)}
+.chips{display:flex;gap:7px;flex-wrap:wrap}
+.chip{padding:5px 11px;border-radius:8px;background:var(--surface-2);border:1px solid var(--line-2);font-size:12.5px;font-weight:500;cursor:pointer;transition:.14s;color:var(--text-2)}
+.chip:hover{border-color:var(--brand);color:var(--text);background:var(--surface-3)}
+.sep{height:1px;background:var(--line);margin:17px 0}
+.meter{height:4px;background:var(--surface-3);border-radius:2px;overflow:hidden;margin-top:9px}
+.meter i{display:block;height:100%;background:linear-gradient(90deg,var(--brand),var(--brand-2));border-radius:2px;transition:width .1s}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2 4.2 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.1a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/></svg></div>
+    ReceptionFlow
+  </div>
+  <span class="pill"><span class="flag"><i></i><i></i><i></i></span> India</span>
+  <div class="spacer"></div>
+  <span class="pill" id="gwPill"><span class="dot" id="gwDot"></span><span id="gwText">gateway offline</span></span>
+  <div class="picker">
+    <select id="biz"></select>
+    <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="banner" id="banner">
+    <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></div>
+    <div>
+      <b>Indian numbers run through Exotel, not Vapi</b>
+      <p>TRAI requires call signalling and audio to originate inside India. Start the voice gateway with <code>node apps/voice-gateway/server.mjs</code> and point an Exotel Voicebot applet at it. See <code>docs/exotel-setup.md</code>.</p>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab on" data-t="overview">Overview</button>
+    <button class="tab" data-t="test">Test tools</button>
+    <button class="tab" data-t="live">Live calls</button>
+    <button class="tab" data-t="prompt">Prompt</button>
+  </div>
+
+  <!-- OVERVIEW -->
+  <section id="v-overview">
+    <div class="grid g3" style="margin-bottom:18px">
+      <div class="card"><div class="card-b"><div class="stat"><div class="n accent" id="sLeads">0</div><div class="l">Leads captured</div></div></div></div>
+      <div class="card"><div class="card-b"><div class="stat"><div class="n" id="sCalls">0</div><div class="l">Calls handled</div></div></div></div>
+      <div class="card"><div class="card-b"><div class="stat"><div class="n" id="sLive">0</div><div class="l">Live right now</div></div></div></div>
+    </div>
+    <div class="grid g-side">
+      <div class="card">
+        <div class="card-h"><h3>Recent leads</h3><div class="spacer"></div><button class="btn ghost sm" id="btnRefresh">Refresh</button></div>
+        <div class="card-b tight"><div id="leadList"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h3>Business</h3></div>
+        <div class="card-b" id="bizInfo"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TEST -->
+  <section id="v-test" hidden>
+    <div class="grid g-side">
+      <div class="card">
+        <div class="card-h"><h3>Run a tool</h3></div>
+        <div class="card-b">
+          <div class="chips">
+            <button class="chip" id="btnHours">check_hours</button>
+            <button class="chip" id="btnTransfer">transfer_call</button>
+          </div>
+          <div id="toolOut"></div>
+          <div class="sep"></div>
+          <div class="row">
+            <div class="field"><label>Name</label><input id="lName" value="Ankit Verma"></div>
+            <div class="field"><label>Phone</label><input id="lPhone" value="98765 43210"></div>
+          </div>
+          <div class="row"><div class="field"><label>Reason</label><input id="lReason" value="Wants an appointment on Saturday"></div></div>
+          <div class="row"><button class="btn" id="btnLead"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>capture_lead</button></div>
+          <div id="leadOut"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h3>Talk to it</h3></div>
+        <div class="card-b">
+          <p class="hint" style="margin-bottom:13px">Type what a caller would say. Runs the same engine a real call uses.</p>
+          <div class="convo" id="chat"></div>
+          <div class="row" style="margin-top:13px">
+            <div class="field"><input id="chatIn" placeholder="kya aap abhi khule ho?" autocomplete="off"></div>
+            <button class="btn" id="btnSend">Send</button>
+          </div>
+          <div class="chips" style="margin-top:11px">
+            <button class="chip sug">Are you open right now?</button>
+            <button class="chip sug">Root canal ka kitna charge hai?</button>
+            <button class="chip sug">I want to speak to a person</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LIVE -->
+  <section id="v-live" hidden>
+    <div class="grid g-side">
+      <div class="card">
+        <div class="card-h"><h3>Live transcript</h3><div class="spacer"></div><span class="pill"><span class="dot" id="mDot"></span><span id="mText">not connected</span></span></div>
+        <div class="card-b"><div class="convo" id="liveFeed" style="max-height:470px"><div class="empty"><svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg><p>Waiting for a call. Start the voice gateway, then dial your ExoPhone.</p></div></div></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h3>Simulate a call</h3></div>
+        <div class="card-b">
+          <p class="hint" style="margin-bottom:13px">No phone needed. Runs a full call against the gateway with mock providers.</p>
+          <pre style="max-height:none">MOCK_PROVIDERS=1 \
+node apps/voice-gateway/server.mjs
+
+node scripts/simulate-call.mjs \
+  --business <span class="b" id="simSlug">sharma-dental</span></pre>
+          <div class="sep"></div>
+          <div id="provList"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROMPT -->
+  <section id="v-prompt" hidden>
+    <div class="card">
+      <div class="card-h"><h3>Generated system prompt</h3><div class="spacer"></div>
+        <span class="hint" id="promptLen"></span>
+        <button class="btn ghost sm" id="btnCopy">Copy</button>
+      </div>
+      <div class="card-b"><pre id="prompt">Loading…</pre></div>
+    </div>
+  </section>
+</div>
+
+<script type="module">
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s??"").replace(/[<>&]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+let slug=null, cfg=null, chatLog=[];
+
+const GW = location.port === "3100" ? "localhost:8080" : location.host;
+
+/* ---------- auth ----------
+   AGENT_SERVER_SECRET gates every endpoint that runs a tool or returns
+   captured leads. Unset (the default for local work) means no prompt and
+   no friction. Set means the console asks once and keeps the value in a
+   variable for the life of the page — never in storage, so closing the tab
+   is enough to forget it, and so a shared browser doesn't retain it. */
+let secret=null;
+const {required:authRequired}=await(await fetch("/api/auth")).json();
+if(authRequired){
+  secret=prompt("This server has AGENT_SERVER_SECRET set.\nPaste it to use the console:")||"";
+}
+/* Every console fetch goes through this, so nothing forgets the header. */
+const api=(path,init={})=>fetch(path,{...init,headers:{...(init.headers||{}),...(secret?{"x-agent-secret":secret}:{})}})
+  .then(r=>{
+    if(r.status===401) throw new Error("Unauthorized — wrong AGENT_SERVER_SECRET. Reload to re-enter it.");
+    return r;
+  });
+
+/* ---------- boot ---------- */
+const {businesses,default:def}=await(await api("/api/businesses")).json();
+$("#biz").innerHTML=businesses.map(b=>`<option value="${b.slug}">${b.name}</option>`).join("");
+$("#biz").value=def??businesses[0]?.slug;
+$("#biz").onchange=()=>load($("#biz").value);
+await load($("#biz").value);
+pollGateway(); setInterval(pollGateway,5000);
+connectMonitor();
+
+async function load(s){
+  slug=s;
+  const a=await(await api(`/api/agent/${s}`)).json();
+  cfg=a;
+  $("#prompt").innerHTML=highlight(a.systemPrompt);
+  $("#promptLen").textContent=`${a.systemPrompt.length.toLocaleString()} chars · ${a.tools.length} tools`;
+  $("#simSlug").textContent=s;
+  $("#toolOut").innerHTML="";$("#leadOut").innerHTML="";
+  chatLog=[];renderChat();
+  const b=businesses.find(x=>x.slug===s);
+  $("#bizInfo").innerHTML=`
+    <div class="stat" style="margin-bottom:14px"><div class="n" style="font-size:19px">${esc(b.name)}</div><div class="l">${esc(b.type??"")}${b.city?` · ${esc(b.city)}`:""}</div></div>
+    <div class="chips">${a.tools.map(t=>`<span class="chip" style="cursor:default">${esc(t.name)}</span>`).join("")}</div>`;
+  await refresh();
+}
+
+/* ---------- tabs ---------- */
+$$(".tab").forEach(t=>t.onclick=()=>{
+  $$(".tab").forEach(x=>x.classList.toggle("on",x===t));
+  ["overview","test","live","prompt"].forEach(n=>$(`#v-${n}`).hidden=(n!==t.dataset.t));
+});
+
+/* ---------- tools ---------- */
+const sim=(tool,args={})=>api("/api/simulate",{method:"POST",headers:{"content-type":"application/json"},
+  body:JSON.stringify({business:slug,tool,arguments:args})}).then(r=>r.json());
+
+function showRes(el,r){
+  const cls=!r.ok?"no":(r.transfer===false?"no":"ok");
+  const {say,...rest}=r;
+  el.innerHTML=`<div class="res ${cls}"><div class="res-t">"${esc(say)}"</div><div class="res-m">${esc(JSON.stringify(rest))}</div></div>`;
+}
+$("#btnHours").onclick=async()=>showRes($("#toolOut"),await sim("check_hours"));
+$("#btnTransfer").onclick=async()=>showRes($("#toolOut"),await sim("transfer_call",{reason:"caller asked for the owner"}));
+$("#btnLead").onclick=async()=>{
+  showRes($("#leadOut"),await sim("capture_lead",{name:$("#lName").value,phone:$("#lPhone").value,reason:$("#lReason").value}));
+  await refresh();
+};
+
+/* ---------- chat ---------- */
+$$(".sug").forEach(b=>b.onclick=()=>{$("#chatIn").value=b.textContent;send()});
+$("#btnSend").onclick=send;
+$("#chatIn").onkeydown=e=>{if(e.key==="Enter")send()};
+
+async function send(){
+  const text=$("#chatIn").value.trim(); if(!text)return;
+  $("#chatIn").value="";
+  chatLog.push({role:"caller",text}); renderChat();
+
+  // Route through the same tool handlers a real call uses.
+  const t=text.toLowerCase();
+  let res=null;
+  if(/open|close|timing|khul|band/.test(t)) res=await sim("check_hours");
+  else if(/person|human|manager|owner|doctor|baat/.test(t)) res=await sim("transfer_call",{reason:"caller asked for a person"});
+  else if(/call ?back|book|appointment/.test(t)) res=await sim("capture_lead",{name:$("#lName").value,phone:$("#lPhone").value,reason:text});
+
+  chatLog.push({role:"agent",text:res?res.say:"I can help with that — the full reply comes from the LLM on a real call.",tool:res?true:false});
+  renderChat(); if(res)await refresh();
+}
+
+function renderChat(){
+  const el=$("#chat");
+  if(!chatLog.length){el.innerHTML=`<div class="empty"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><p>Say something to start.</p></div>`;return}
+  el.innerHTML=chatLog.map(m=>`<div class="msg ${m.role}">
+    <div class="av">${m.role==="agent"?"AI":"C"}</div>
+    <div><div class="who">${m.role==="agent"?(cfg?.name??"Agent"):"Caller"}</div><div class="bub">${esc(m.text)}</div></div>
+  </div>`).join("");
+  el.scrollTop=el.scrollHeight;
+}
+
+/* ---------- data ---------- */
+$("#btnRefresh").onclick=refresh;
+async function refresh(){
+  const {leads}=await(await api(`/api/leads/${slug}`)).json();
+  $("#sLeads").textContent=leads.length;
+  $("#leadList").innerHTML=leads.length?leads.slice(0,8).map(l=>`
+    <div class="item">
+      <div class="item-h"><b>${esc(l.name)}</b><span class="tel">${esc(l.phone)}</span></div>
+      <div class="item-s">${esc(l.reason)}</div>
+      <div class="item-t">${new Date(l.created_at).toLocaleString("en-IN",{dateStyle:"medium",timeStyle:"short"})}</div>
+    </div>`).join(""):`<div class="empty"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>No leads yet.</p></div>`;
+}
+
+/* ---------- gateway ---------- */
+async function pollGateway(){
+  try{
+    const h=await(await fetch(`http://${GW}/health`,{signal:AbortSignal.timeout(2000)})).json();
+    $("#gwDot").className=`dot ${h.ok?"on":"off"}`;
+    $("#gwText").textContent=h.ok?(h.providers.stt?.startsWith("mock")?"gateway · mock":"gateway live"):"providers missing";
+    $("#sLive").textContent=h.liveCalls??0;
+    $("#provList").innerHTML=["stt","tts","llm"].map(k=>
+      `<div class="item" style="padding:9px 0;border-color:var(--line)"><div class="item-h">
+        <span class="dot ${h.providers[k]?"on":"off"}"></span><b>${k.toUpperCase()}</b>
+        <div class="spacer"></div><span class="hint">${esc(h.providers[k]??"not set")}</span></div></div>`).join("");
+    $("#banner").hidden = h.ok && !h.providers.stt?.startsWith("mock");
+  }catch{
+    $("#gwDot").className="dot off";
+    $("#gwText").textContent="gateway offline";
+    $("#provList").innerHTML=`<p class="hint">Start it: <code>node apps/voice-gateway/server.mjs</code></p>`;
+  }
+}
+
+function connectMonitor(){
+  let ws;
+  try{ ws=new WebSocket(`ws://${GW}/monitor`); }catch{ return }
+  ws.onopen=()=>{$("#mDot").className="dot live";$("#mText").textContent="listening"};
+  ws.onclose=()=>{$("#mDot").className="dot off";$("#mText").textContent="not connected";setTimeout(connectMonitor,5000)};
+  ws.onerror=()=>{};
+  ws.onmessage=e=>{
+    const m=JSON.parse(e.data);
+    const feed=$("#liveFeed");
+    if(m.type==="started"){feed.innerHTML="";addLive("agent",`Call from ${m.from}`,true)}
+    else if(m.type==="transcript")addLive(m.role,m.text);
+    else if(m.type==="tool")addLive("agent",`↳ ${m.name}`,true);
+    else if(m.type==="ended")addLive("agent",`Call ended · ${m.duration_seconds}s`,true);
+    if(m.type==="started"||m.type==="ended")pollGateway();
+  };
+}
+function addLive(role,text,meta){
+  const feed=$("#liveFeed");
+  if(feed.querySelector(".empty"))feed.innerHTML="";
+  const d=document.createElement("div");
+  d.className=`msg ${role}`;
+  d.innerHTML=`<div class="av">${role==="agent"?"AI":"C"}</div><div><div class="who">${role==="agent"?"Agent":"Caller"}</div><div class="bub"${meta?' style="opacity:.65;font-size:12.5px"':''}>${esc(text)}</div></div>`;
+  feed.appendChild(d); feed.scrollTop=feed.scrollHeight;
+}
+
+/* ---------- prompt ---------- */
+$("#btnCopy").onclick=async()=>{
+  await navigator.clipboard.writeText(cfg.systemPrompt);
+  $("#btnCopy").textContent="Copied";setTimeout(()=>$("#btnCopy").textContent="Copy",1300);
+};
+function highlight(t){
+  return esc(t).split("\n").map(l=>l.startsWith("# ")?`<span class="h">${l}</span>`:l).join("\n");
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,593 @@
+{
+  "name": "ReceptionFlow - get_service_or_price_info",
+  "nodes": [
+    {
+      "id": "9c7d33e5-2038-4c18-beef-3ceae9142b38",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1100,
+        -300
+      ],
+      "parameters": {
+        "width": 760,
+        "height": 220,
+        "content": "## get_service_or_price_info (new)\n`POST /webhook/get-service-or-price-info`\n\n**Body:** `business_id`, `service_name`\n\nLooks up one service by a fuzzy (case-insensitive, partial) match against this business's own active services -- callers describe services in their own words (\"the beard thing\"), so an exact match would reject too much. Price is only ever returned in the shape the service's own `price_disclosure` allows (`exact`, `range`, or `not_disclosed`); this workflow never estimates a number that wasn't already in Supabase."
+      }
+    },
+    {
+      "id": "09562526-2914-477a-9fb6-523e05047600",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1060,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "get-service-or-price-info",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "webhookId": "get-service-or-price-info-placeholder",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_N8N_GATEWAY_HEADER_AUTH_CREDENTIAL",
+          "name": "ReceptionFlow Gateway Shared Secret (placeholder)"
+        }
+      }
+    },
+    {
+      "id": "4fe80a44-7462-44e1-ba0e-a25ecc825723",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -840,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// get_service_or_price_info — Validate Input\nconst body = $input.first().json.body || {};\nconst businessId = String(body.business_id ?? '').trim();\nconst serviceName = String(body.service_name ?? body.service ?? '').trim();\n\nconst errors = [];\nif (!businessId) errors.push('business_id is required');\nif (!serviceName) errors.push('service_name is required');\n\n// PostgREST ilike wildcard match -- '*' is its wildcard character, and\n// this also escapes commas/parens that would otherwise be parsed as\n// PostgREST filter syntax.\nconst escaped = serviceName.replace(/[,()]/g, '');\n\nreturn [{\n  json: {\n    valid: errors.length === 0,\n    errors,\n    business_id_input: businessId,\n    service_name: serviceName,\n    ilike_term: '*' + escaped + '*',\n  },\n}];"
+      }
+    },
+    {
+      "id": "c4a56b06-8099-48f1-81c3-ee26899e10b2",
+      "name": "IF Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -620,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "bb59fd9f-8241-4ec7-adbb-59e6398d87e5",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "ed9d9278-4e6a-492b-adcf-05c4cf72098f",
+      "name": "Respond 400 Invalid Input",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -400,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"invalid_input\", \"found\": false, \"message\": \"business_id and service_name are required.\", \"details\": $json.errors } }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "4d0fef12-2a35-4b0c-a2e7-acd7acd9c424",
+      "name": "Get Business",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/businesses",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id"
+            },
+            {
+              "name": "business_slug",
+              "value": "={{ \"eq.\" + $json.business_id_input }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "8b801d17-ca0c-4cea-9c0b-226f13da9006",
+      "name": "Respond 502 Supabase Unavailable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -180,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"supabase_unavailable\", \"found\": false, \"message\": \"Could not reach Supabase.\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "14be387a-e091-491e-a07f-60a6b5f2af69",
+      "name": "Normalize Business",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\nreturn [{ json: { business_found: !!row, business_id: row ? row.id : null } }];"
+      }
+    },
+    {
+      "id": "5adaf6d1-f915-49e7-8c7e-75ffc51ab82d",
+      "name": "IF Business Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        40,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b76f765b-c878-4fca-b19c-f02cc65ff961",
+              "leftValue": "={{ $json.business_found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "bd8511c1-9120-4a22-9eb1-6d50975a0e5e",
+      "name": "Respond 404 Unknown Business",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        260,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"unknown_business\", \"found\": false, \"message\": \"No business is registered with that business_id.\" } }}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    },
+    {
+      "id": "6e7522d8-3258-4326-aeda-d24d9a86ee1f",
+      "name": "Get Business Settings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/business_settings",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "price_policy"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ \"eq.\" + $('Normalize Business').first().json.business_id }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "87af37ed-d668-4e0b-87ea-341f3d16b09f",
+      "name": "Get Service Match",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/services",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id,name,description,duration_minutes,price_disclosure,price_amount,price_range,bookable"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ \"eq.\" + $('Normalize Business').first().json.business_id }}"
+            },
+            {
+              "name": "active",
+              "value": "eq.true"
+            },
+            {
+              "name": "name",
+              "value": "={{ \"ilike.\" + $('Validate Input').first().json.ilike_term }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "fa15c61f-40da-4727-9a59-51aae9820151",
+      "name": "Respond 502 Supabase Unavailable 2",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        700,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"supabase_unavailable\", \"found\": false, \"message\": \"Could not reach Supabase.\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "ca2a6fa8-9877-4242-9a93-d9e2e6d55029",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// get_service_or_price_info — Build Response\n// price_disclosure decides the ONLY shape a price is ever returned in:\n//   exact          -> price_amount is a real number, safe to state directly\n//   range          -> price_range is a pre-approved string, never computed here\n//   not_disclosed  -> no number or range is returned at all, ever\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\n\nlet disclaimerNote = null;\ntry {\n  const settingsItem = $('Get Business Settings').first();\n  const policy = settingsItem && settingsItem.json && settingsItem.json.price_policy;\n  disclaimerNote = policy && policy.disclaimer_note ? policy.disclaimer_note : null;\n} catch (e) {\n  disclaimerNote = null;\n}\n\nconst input = $('Validate Input').first().json;\n\nif (!row) {\n  return [{\n    json: {\n      found: false,\n      business_id: input.business_id_input,\n      service_name: input.service_name,\n      message: 'No service matching that description was found. Do not assume it exists or guess a price.',\n    },\n  }];\n}\n\nreturn [{\n  json: {\n    found: true,\n    business_id: input.business_id_input,\n    service_name: row.name,\n    description: row.description,\n    duration_minutes: row.duration_minutes,\n    price_disclosure: row.price_disclosure,\n    price_amount: row.price_disclosure === 'exact' ? row.price_amount : null,\n    price_range: row.price_disclosure === 'range' ? row.price_range : null,\n    disclaimer_note: row.price_disclosure === 'not_disclosed' ? null : disclaimerNote,\n    bookable: !!row.bookable,\n  },\n}];"
+      }
+    },
+    {
+      "id": "a4525660-f4cd-4ed0-b910-0836937557df",
+      "name": "IF Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        920,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f094aaa9-8e96-41d1-b014-149f737a103d",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "67d134fe-9100-478e-b84b-389881b23014",
+      "name": "Respond 200 Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1140,
+        -160
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "44407eb2-acce-48dc-98f0-097f0b23872b",
+      "name": "Respond 404 Unknown Service",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1140,
+        60
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "IF Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Valid": {
+      "main": [
+        [
+          {
+            "node": "Get Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400 Invalid Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business": {
+      "main": [
+        [
+          {
+            "node": "Normalize Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Business": {
+      "main": [
+        [
+          {
+            "node": "IF Business Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Business Found": {
+      "main": [
+        [
+          {
+            "node": "Get Business Settings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 404 Unknown Business",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business Settings": {
+      "main": [
+        [
+          {
+            "node": "Get Service Match",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Service Match": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "IF Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Found": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 Found",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 404 Unknown Service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "REPLACE_ON_IMPORT"
+  },
+  "tags": []
+}

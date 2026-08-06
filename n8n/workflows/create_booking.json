@@ -1,0 +1,1689 @@
+{
+  "name": "ReceptionFlow - create_booking",
+  "nodes": [
+    {
+      "id": "208d1599-20b1-4844-a679-b5f24bf064e6",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2000,
+        -460
+      ],
+      "parameters": {
+        "width": 820,
+        "height": 280,
+        "content": "## create_booking\n`POST /webhook/create-booking`\n\n**Body:** `business_id`, `customer_name`, `phone`, `email` (optional), `service` (or `service_or_staff`), `selected_slot`\n\nOrder: **resolve business → booking-enabled check → resolve service → bookable check → duplicate check → table conflict check → (if this business has a Google Calendar configured) calendar re-check → calendar write → Supabase write**. Businesses without a configured calendar can still take phone bookings -- the `appointments` table is the source of truth either way; the calendar step only runs when `business_settings.availability_source = 'google_calendar'` and a `calendar_id` is set. If any write fails, a calendar event that was created gets rolled back and the response says `confirmed: false`. Nothing here reports success unless a Supabase row came back with an id."
+      }
+    },
+    {
+      "id": "064b3783-ffc9-487a-a46c-a2c90e25bc2e",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1960,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-booking",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "webhookId": "create-booking-placeholder",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_N8N_GATEWAY_HEADER_AUTH_CREDENTIAL",
+          "name": "ReceptionFlow Gateway Shared Secret (placeholder)"
+        }
+      }
+    },
+    {
+      "id": "51813ffb-8591-400a-8e42-19e7748000de",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1740,
+        0
+      ],
+      "parameters": {
+        "jsCode": "function normalizePhone(raw) {\n  const digits = String(raw || '').replace(/\\D/g, '');\n  if (digits.length < 7 || digits.length > 15) return null;\n  return '+' + digits;\n}\n\n// create_booking — Validate Input\n// Expected body: { business_id, customer_name, phone, email, service or\n//   service_or_staff, selected_slot, call_id }\n// selected_slot is either the whole slot object returned by\n// get_available_slots/get_availability ({ start, end, label }) or just an\n// ISO start string -- the end is derived from the service duration.\nconst body = $input.first().json.body || {};\n\nconst businessId = String(body.business_id ?? '').trim();\nconst customerName = String(body.customer_name ?? body.name ?? '').trim();\nconst rawPhone = String(body.phone ?? body.customer_phone ?? '').trim();\nconst email = String(body.email ?? body.customer_email ?? '').trim();\nconst service = String(body.service ?? body.service_or_staff ?? body.service_name ?? '').trim();\nconst callId = String(body.call_id ?? '').trim() || null;\n\nconst rawSlot = body.selected_slot ?? body.slot ?? null;\nlet slotStartRaw = '';\nlet slotEndRaw = '';\nif (rawSlot && typeof rawSlot === 'object') {\n  slotStartRaw = String(rawSlot.start ?? rawSlot.slot_start ?? '').trim();\n  slotEndRaw = String(rawSlot.end ?? rawSlot.slot_end ?? '').trim();\n} else if (typeof rawSlot === 'string') {\n  slotStartRaw = rawSlot.trim();\n}\nif (!slotStartRaw) slotStartRaw = String(body.slot_start ?? '').trim();\nif (!slotEndRaw) slotEndRaw = String(body.slot_end ?? '').trim();\n\nconst errors = [];\nif (!businessId) errors.push('business_id is required');\nif (!customerName) errors.push('customer_name is required');\n\n// Country-agnostic normalization -- see docs/n8n-setup.md \"Known\n// simplifications\". Does not assume a country code; the caller's digits\n// must already include one.\nconst phoneE164 = normalizePhone(rawPhone);\nif (!rawPhone) {\n  errors.push('phone is required');\n} else if (!phoneE164) {\n  errors.push('phone must contain 7-15 digits, including country code');\n}\n\nif (email && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(email)) {\n  errors.push('email is not a valid email address');\n}\n\nif (!service) errors.push('service is required');\n\nlet slotStart = null;\nlet slotEnd = null;\n\nif (!slotStartRaw) {\n  errors.push('selected_slot is required (an ISO 8601 start time, or { start, end })');\n} else {\n  slotStart = DateTime.fromISO(slotStartRaw, { setZone: true });\n  if (!slotStart.isValid) {\n    errors.push('selected_slot start is not a valid ISO 8601 date and time');\n  }\n}\n\nif (slotEndRaw) {\n  slotEnd = DateTime.fromISO(slotEndRaw, { setZone: true });\n  if (!slotEnd.isValid) {\n    errors.push('selected_slot end is not a valid ISO 8601 date and time');\n  } else if (slotStart && slotStart.isValid && slotEnd <= slotStart) {\n    errors.push('selected_slot end must be after its start');\n  }\n}\n\nreturn [{\n  json: {\n    valid: errors.length === 0,\n    errors,\n    business_id_input: businessId,\n    customer_name: customerName,\n    phone: rawPhone,\n    phone_e164: phoneE164,\n    email: email || null,\n    service,\n    call_id: callId,\n    slot_start_raw: slotStart && slotStart.isValid ? slotStart.toISO() : null,\n    slot_end_raw: slotEnd && slotEnd.isValid ? slotEnd.toISO() : null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "f2660bf8-7693-4c33-a377-83f684548c8c",
+      "name": "IF Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1520,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "726566b9-dc06-4f32-aa5f-a48f65703947",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "d582f78a-cc87-499b-bbdc-8e3ea0a8f291",
+      "name": "Respond 400 Invalid Input",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -1300,
+        260
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"invalid_input\", \"status\": \"not_confirmed\", \"confirmed\": false, \"booking_id\": null, \"message\": \"The booking request was missing or malformed fields.\", \"details\": $json.errors } }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "7ad5b355-fe80-4096-a11c-d396abb45d40",
+      "name": "Get Business",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1300,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/businesses",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id,name,timezone,business_slug"
+            },
+            {
+              "name": "business_slug",
+              "value": "={{ \"eq.\" + $json.business_id_input }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "8e502e74-6fd1-449e-8ad5-75863ab57a99",
+      "name": "Respond 502 Supabase Unavailable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -1080,
+        260
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"supabase_unavailable\", \"status\": \"not_confirmed\", \"confirmed\": false, \"booking_id\": null, \"message\": \"Could not reach Supabase, so no booking was made.\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "054e77bb-7a05-4a91-9bfc-e1c41dac7e1b",
+      "name": "Normalize Business",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1080,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// Normalize Business\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\n\nreturn [{\n  json: {\n    business_found: !!row,\n    business_id: row ? row.id : null,\n    business_timezone: row ? row.timezone : null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "43ac0612-9a86-4a75-8577-324391ebb3ad",
+      "name": "IF Business Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -860,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1be8330e-bf26-4c86-953c-a682caa77434",
+              "leftValue": "={{ $json.business_found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "caa703a5-c11c-474a-ab80-109de8c50e59",
+      "name": "Respond 404 Unknown Business",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -640,
+        260
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"unknown_business\", \"status\": \"not_confirmed\", \"confirmed\": false, \"booking_id\": null, \"message\": \"No business is registered with that business_id.\" } }}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    },
+    {
+      "id": "d381dddc-a3a2-4f98-8d90-c74b8eeb8b2b",
+      "name": "Get Business Settings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -640,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/business_settings",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "*"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ \"eq.\" + $('Normalize Business').first().json.business_id }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "98921fe1-6e9e-4544-bc6c-527a6db4fc29",
+      "name": "Normalize Settings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// Normalize Settings\n// No settings row is treated as \"booking not configured\" -- booking_enabled\n// defaults false so a business that hasn't been set up yet can never be\n// booked into by accident.\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.business_id ? items[0].json : null;\n\nreturn [{\n  json: {\n    booking_enabled: row ? !!row.booking_enabled : false,\n    availability_source: row ? row.availability_source : 'not_tracked',\n    calendar_id: row ? row.calendar_id : null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "822ca7a4-a5ff-490f-a70b-ec3c4bb91e26",
+      "name": "IF Booking Enabled",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -200,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ff563ce1-d046-4008-b3fc-1e2fe48b90f0",
+              "leftValue": "={{ $json.booking_enabled }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "4cb753ea-4f29-4046-99c9-606ec18429a1",
+      "name": "Respond 403 Booking Disabled",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -20,
+        260
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"booking_disabled\", \"status\": \"not_confirmed\", \"confirmed\": false, \"booking_id\": null, \"message\": \"This business does not take phone bookings. Offer create_callback_request instead.\" } }}",
+        "options": {
+          "responseCode": 403
+        }
+      }
+    },
+    {
+      "id": "2002555b-e361-4f68-9ad0-564045a2cf99",
+      "name": "Get Service",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -20,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/services",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id,name,duration_minutes,bookable"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ \"eq.\" + $('Normalize Business').first().json.business_id }}"
+            },
+            {
+              "name": "name",
+              "value": "={{ \"eq.\" + $('Validate Input').first().json.service }}"
+            },
+            {
+              "name": "active",
+              "value": "eq.true"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "bed1e98f-6a3a-4a0d-bea3-135cb1458c6b",
+      "name": "Normalize Service",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// create_booking — Normalize Service\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\n\nreturn [{\n  json: {\n    service_found: !!row,\n    service_id: row ? row.id : null,\n    service_name: row ? row.name : $('Validate Input').first().json.service,\n    duration_minutes: row ? row.duration_minutes : null,\n    bookable: row ? !!row.bookable : false,\n  },\n}];"
+      }
+    },
+    {
+      "id": "5d90ca3f-d28b-4a9c-ab44-fa20742a8efe",
+      "name": "IF Service Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        420,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "93b9c2ef-0295-46bc-8f8e-1fe4df949913",
+              "leftValue": "={{ $json.service_found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "36e4f2de-1bbd-4e55-b0b7-7fcfa58b9725",
+      "name": "Respond 404 Unknown Service",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        640,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"unknown_service\", \"status\": \"not_confirmed\", \"confirmed\": false, \"booking_id\": null, \"message\": \"That is not a service this business offers.\", \"service\": $json.service_name } }}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    },
+    {
+      "id": "69d66a9d-385f-4903-b2dd-e3eda601b22b",
+      "name": "IF Service Bookable",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1067214b-3fa1-44c7-81f2-0fe2fb9076f4",
+              "leftValue": "={{ $json.bookable }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "23f569a8-1321-4372-a3b3-f4da437d65bb",
+      "name": "Respond 409 Service Not Bookable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        860,
+        140
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"service_not_bookable\", \"status\": \"not_confirmed\", \"confirmed\": false, \"booking_id\": null, \"message\": \"This service is not phone-bookable. Offer create_callback_request instead.\", \"service\": $json.service_name } }}",
+        "options": {
+          "responseCode": 409
+        }
+      }
+    },
+    {
+      "id": "bb9bb857-75a2-4ce4-96f1-8ce8091f8f26",
+      "name": "Resolve Slot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// create_booking — Resolve Slot\n// Fills in the slot end from the service duration when the caller only\n// sent a start time, and produces the spoken-friendly label reused in the\n// response and the calendar event.\nconst input = $('Validate Input').first().json;\nconst business = $('Normalize Business').first().json;\nconst service = $('Normalize Service').first().json;\n\nconst tz = business.business_timezone || 'UTC';\nconst duration = Number(service.duration_minutes);\n\nconst start = DateTime.fromISO(input.slot_start_raw, { setZone: true });\nconst end = input.slot_end_raw\n  ? DateTime.fromISO(input.slot_end_raw, { setZone: true })\n  : start.plus({ minutes: duration });\n\nreturn [{\n  json: {\n    business_timezone: tz,\n    slot_start: start.toISO(),\n    slot_end: end.toISO(),\n    slot_label: start.setZone(tz).toFormat(\"cccc, LLLL d 'at' h:mm a\"),\n    duration_minutes: duration,\n  },\n}];"
+      }
+    },
+    {
+      "id": "92e9a741-fa18-4c01-ae0d-b42cb33ac798",
+      "name": "Find Duplicate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1080,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/appointments",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id,start_time,end_time,status,calendar_event_id"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ \"eq.\" + $('Normalize Business').first().json.business_id }}"
+            },
+            {
+              "name": "customer_phone",
+              "value": "={{ \"eq.\" + $('Validate Input').first().json.phone_e164 }}"
+            },
+            {
+              "name": "service_id",
+              "value": "={{ \"eq.\" + $('Normalize Service').first().json.service_id }}"
+            },
+            {
+              "name": "start_time",
+              "value": "={{ \"eq.\" + $('Resolve Slot').first().json.slot_start }}"
+            },
+            {
+              "name": "status",
+              "value": "neq.Cancelled"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "5f066c4f-b28b-47d2-9e5d-360806da9f95",
+      "name": "Normalize Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// create_booking — Normalize Duplicate\n// Business-scoped duplicate key: phone + service + slot start, matching a\n// non-cancelled appointment for THIS business. Runs before any conflict\n// check on purpose: a retried request should find its own prior booking,\n// not collide with it.\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\n\nreturn [{\n  json: {\n    duplicate_found: !!row,\n    existing_booking_id: row ? row.id : null,\n    existing_start_time: row ? row.start_time : null,\n    existing_end_time: row ? row.end_time : null,\n    existing_calendar_event_id: row ? row.calendar_event_id : null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "36c01af2-f620-4e3c-b9e6-f195a56f2fc5",
+      "name": "IF Duplicate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1520,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "02ca0b49-f491-4ed1-b02d-29b51eccdef8",
+              "leftValue": "={{ $json.duplicate_found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "dea6044a-532c-4199-a329-208cbb13fe26",
+      "name": "Respond 200 Already Booked",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1740,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"booking_id\": $json.existing_booking_id, \"status\": \"already_booked\", \"confirmed\": true, \"business_id\": $('Validate Input').first().json.business_id_input, \"service\": $('Normalize Service').first().json.service_name, \"customer_name\": $('Validate Input').first().json.customer_name, \"customer_phone\": $('Validate Input').first().json.phone_e164, \"appointment_start\": $json.existing_start_time, \"appointment_end\": $json.existing_end_time, \"appointment_label\": $('Resolve Slot').first().json.slot_label, \"timezone\": $('Resolve Slot').first().json.business_timezone, \"calendar_event_id\": $json.existing_calendar_event_id, \"message\": \"This appointment already exists. No duplicate was created.\" } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "2229a23e-7d9b-43a6-aaa0-70fbed14dca0",
+      "name": "Check Table Conflict",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1740,
+        -140
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/appointments",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ \"eq.\" + $('Normalize Business').first().json.business_id }}"
+            },
+            {
+              "name": "status",
+              "value": "neq.Cancelled"
+            },
+            {
+              "name": "start_time",
+              "value": "={{ \"lt.\" + $('Resolve Slot').first().json.slot_end }}"
+            },
+            {
+              "name": "end_time",
+              "value": "={{ \"gt.\" + $('Resolve Slot').first().json.slot_start }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "2e492a57-8876-4800-bd8d-93f9dd1a5042",
+      "name": "Normalize Table Conflict",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "// create_booking — Normalize Table Conflict\n// The appointments table is this project's source of truth regardless of\n// whether a business has Google Calendar connected, so this check always\n// runs -- catching two callers booking the same business (and, if a\n// staff_id is later added to the request, the same staff member) before\n// anything is written.\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\n\nreturn [{ json: { table_conflict: !!row } }];"
+      }
+    },
+    {
+      "id": "454af1da-8dc7-4057-af91-9ef8156bcced",
+      "name": "IF Table Conflict",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2180,
+        -140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8d446743-5f5c-4136-b414-bbae8146de2a",
+              "leftValue": "={{ $json.table_conflict }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "6aba75a6-0f6d-4cbc-94c5-7358829fdaba",
+      "name": "Respond 409 Slot Unavailable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2400,
+        140
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"slot_unavailable\", \"status\": \"not_confirmed\", \"confirmed\": false, \"booking_id\": null, \"message\": \"That slot was taken while the caller was deciding. Offer the next available time.\" } }}",
+        "options": {
+          "responseCode": 409
+        }
+      }
+    },
+    {
+      "id": "d7acdff0-f0bf-4eb9-b183-8a87c024e48d",
+      "name": "IF Calendar Configured",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2400,
+        -260
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5065d6c0-a5c5-48ac-9c6f-e62f02f430fb",
+              "leftValue": "={{ $('Normalize Settings').first().json.availability_source === 'google_calendar' && !!$('Normalize Settings').first().json.calendar_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "3d1b0e89-52a7-4a0b-a5af-a0a84dcad7cd",
+      "name": "Get Conflicting Events",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [
+        2620,
+        -400
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Normalize Settings').first().json.calendar_id }}"
+        },
+        "resource": "event",
+        "operation": "getAll",
+        "returnAll": true,
+        "timeMin": "={{ $('Resolve Slot').first().json.slot_start }}",
+        "timeMax": "={{ $('Resolve Slot').first().json.slot_end }}",
+        "options": {
+          "singleEvents": true,
+          "orderBy": "startTime"
+        }
+      },
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_GOOGLE_CALENDAR_CREDENTIAL",
+          "name": "ReceptionFlow Google Calendar (placeholder)"
+        }
+      }
+    },
+    {
+      "id": "bac6e225-81e5-46ed-bf97-eb7ec65e4af6",
+      "name": "Respond 502 Calendar Unavailable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2840,
+        -160
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"calendar_unavailable\", \"status\": \"not_confirmed\", \"confirmed\": false, \"booking_id\": null, \"message\": \"Could not re-check Google Calendar, so no booking was made.\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "1e54e5f7-9f5c-421a-834e-882c72d3fba8",
+      "name": "Check Calendar Conflict",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2840,
+        -400
+      ],
+      "parameters": {
+        "jsCode": "// create_booking — Check Calendar Conflict\n// Re-reads Google Calendar for the exact chosen slot immediately before\n// writing. get_availability may have run minutes ago; this closes the\n// window where two callers were offered the same slot.\nconst conflicts = $input\n  .all()\n  .map((item) => item.json)\n  .filter((e) => e && e.id && e.status !== 'cancelled' && e.transparency !== 'transparent');\n\nreturn [{ json: { conflict: conflicts.length > 0 } }];"
+      }
+    },
+    {
+      "id": "dda3cacf-2e2e-4df4-9208-2e1ba2b049a1",
+      "name": "IF Calendar Conflict",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3060,
+        -400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ce227672-b2f4-49c3-8cc2-c9e8de891286",
+              "leftValue": "={{ $json.conflict }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "03d0da39-1619-40c5-a101-5afa3fd5ee7f",
+      "name": "Create Calendar Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [
+        3280,
+        -520
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Normalize Settings').first().json.calendar_id }}"
+        },
+        "resource": "event",
+        "operation": "create",
+        "start": "={{ $('Resolve Slot').first().json.slot_start }}",
+        "end": "={{ $('Resolve Slot').first().json.slot_end }}",
+        "useDefaultReminders": true,
+        "additionalFields": {
+          "summary": "={{ $('Normalize Service').first().json.service_name + \" - \" + $('Validate Input').first().json.customer_name }}",
+          "description": "={{ \"Booked by ReceptionFlow (test).\\nPhone: \" + $('Validate Input').first().json.phone_e164 + \"\\nEmail: \" + ($('Validate Input').first().json.email || \"not provided\") }}"
+        }
+      },
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_GOOGLE_CALENDAR_CREDENTIAL",
+          "name": "ReceptionFlow Google Calendar (placeholder)"
+        }
+      }
+    },
+    {
+      "id": "7f5f7aa7-42e7-467e-868c-2fee1eabcffb",
+      "name": "Respond 502 Calendar Write Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3500,
+        -280
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"calendar_write_failed\", \"status\": \"not_confirmed\", \"confirmed\": false, \"booking_id\": null, \"message\": \"Google Calendar rejected the event, so nothing was booked. Do not tell the caller they are booked.\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "30f30ce7-0883-4c24-8cb2-458071fab88e",
+      "name": "Prepare Insert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3060,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "// create_booking — Prepare Insert\n// Converges the two paths that can reach this point: a business with a\n// configured Google Calendar (a fresh event was just created) or one\n// without (booking straight into the appointments table). try/catch is\n// the standard n8n idiom for \"read a node that may not have executed in\n// this run\" -- referencing a node by name that never ran throws, so this\n// treats that as \"no calendar event exists\" rather than erroring.\nlet calendarEventId = null;\ntry {\n  const row = $('Create Calendar Event').first().json;\n  calendarEventId = row && row.id ? row.id : null;\n} catch (e) {\n  calendarEventId = null;\n}\n\nreturn [{\n  json: {\n    calendar_event_id: calendarEventId,\n    had_calendar_event: !!calendarEventId,\n  },\n}];"
+      }
+    },
+    {
+      "id": "86be7c4a-a8e0-4520-8b61-ab258ff9b122",
+      "name": "Insert Appointment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3280,
+        -140
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/appointments",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"business_id\": $('Normalize Business').first().json.business_id, \"service_id\": $('Normalize Service').first().json.service_id, \"call_id\": $('Validate Input').first().json.call_id, \"customer_name\": $('Validate Input').first().json.customer_name, \"customer_phone\": $('Validate Input').first().json.phone_e164, \"start_time\": $('Resolve Slot').first().json.slot_start, \"end_time\": $('Resolve Slot').first().json.slot_end, \"status\": \"Confirmed\", \"calendar_event_id\": $('Prepare Insert').first().json.calendar_event_id } }}",
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "3ac797fa-5ea4-47cf-90a8-68ed6d1e94af",
+      "name": "Verify Saved",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3500,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "// create_booking — Verify Saved\n// A 2xx from PostgREST with `Prefer: return=representation` should carry\n// the inserted row. If there's no row id we do NOT treat the booking as\n// confirmed, even though the HTTP call itself didn't error -- the caller\n// must never be told they're booked on the strength of an empty response.\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\n\nconst slot = $('Resolve Slot').first().json;\nconst input = $('Validate Input').first().json;\nconst service = $('Normalize Service').first().json;\n\nreturn [{\n  json: {\n    saved: !!row,\n    booking_id: row ? row.id : null,\n    response_ok: {\n      booking_id: row ? row.id : null,\n      status: row ? 'confirmed' : 'not_confirmed',\n      confirmed: !!row,\n      business_id: input.business_id_input,\n      service: service.service_name,\n      customer_name: input.customer_name,\n      customer_phone: input.phone_e164,\n      appointment_start: slot.slot_start,\n      appointment_end: slot.slot_end,\n      appointment_label: slot.slot_label,\n      timezone: slot.business_timezone,\n      calendar_event_id: row ? row.calendar_event_id : null,\n    },\n  },\n}];"
+      }
+    },
+    {
+      "id": "f968861c-153f-4c15-9c51-dfeb0366f416",
+      "name": "IF Saved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3720,
+        -140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cd2f08dc-7ee7-4b9d-9131-a80cf10de8e6",
+              "leftValue": "={{ $json.saved }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "468f54c9-5384-4bcf-b992-5a862522ae05",
+      "name": "Respond 200 Booked",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3940,
+        -280
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response_ok }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "cd6b8417-ff19-46c8-99ab-8266fbf2271d",
+      "name": "IF Had Calendar Event",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3940,
+        40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2e311947-6780-4ff5-bda5-dea616ee847b",
+              "leftValue": "={{ $('Prepare Insert').first().json.had_calendar_event }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "4c7f697e-2eca-40c6-849b-8262927adb10",
+      "name": "Rollback Calendar Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [
+        4160,
+        -60
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Normalize Settings').first().json.calendar_id }}"
+        },
+        "resource": "event",
+        "operation": "delete",
+        "eventId": "={{ $('Prepare Insert').first().json.calendar_event_id }}",
+        "options": {}
+      },
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_GOOGLE_CALENDAR_CREDENTIAL",
+          "name": "ReceptionFlow Google Calendar (placeholder)"
+        }
+      }
+    },
+    {
+      "id": "049cb6bf-8a64-4996-9401-17b66b0efc9b",
+      "name": "Build Not Confirmed Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4380,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// create_booking — Build Not Confirmed Response\n// Reached when a calendar event was created but the Supabase appointment\n// row was not. \"Rollback Calendar Event\" (continueRegularOutput) just ran\n// so the slot isn't silently held; a failed rollback still lands here\n// rather than swallowing the original failure.\nconst rollbackItem = $input.first();\nconst rollbackFailed = !!(rollbackItem && rollbackItem.json && rollbackItem.json.error);\n\nconst slot = $('Resolve Slot').first().json;\nconst service = $('Normalize Service').first().json;\nconst calendarEventId = $('Prepare Insert').first().json.calendar_event_id;\n\nreturn [{\n  json: {\n    error: 'booking_not_saved',\n    status: 'not_confirmed',\n    confirmed: false,\n    booking_id: null,\n    message: 'The appointment could not be saved. Do not tell the caller they are booked -- apologise and offer to transfer them.',\n    service: service.service_name,\n    appointment_start: slot.slot_start,\n    appointment_end: slot.slot_end,\n    calendar_rollback: rollbackFailed ? 'failed' : 'deleted',\n    orphaned_calendar_event_id: rollbackFailed ? calendarEventId : null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "cb04a661-4835-4556-b37c-f75e200eb853",
+      "name": "Respond 502 Not Confirmed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        4600,
+        -60
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "e0dea4d5-0764-4b79-8da1-d4db0fde6e64",
+      "name": "Respond 502 Booking Not Saved",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        4160,
+        220
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"booking_not_saved\", \"status\": \"not_confirmed\", \"confirmed\": false, \"booking_id\": null, \"message\": \"The appointment could not be saved. Do not tell the caller they are booked -- apologise and offer to transfer them.\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "IF Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Valid": {
+      "main": [
+        [
+          {
+            "node": "Get Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400 Invalid Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business": {
+      "main": [
+        [
+          {
+            "node": "Normalize Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Business": {
+      "main": [
+        [
+          {
+            "node": "IF Business Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Business Found": {
+      "main": [
+        [
+          {
+            "node": "Get Business Settings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 404 Unknown Business",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business Settings": {
+      "main": [
+        [
+          {
+            "node": "Normalize Settings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Settings": {
+      "main": [
+        [
+          {
+            "node": "IF Booking Enabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Booking Enabled": {
+      "main": [
+        [
+          {
+            "node": "Get Service",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 403 Booking Disabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Service": {
+      "main": [
+        [
+          {
+            "node": "Normalize Service",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Service": {
+      "main": [
+        [
+          {
+            "node": "IF Service Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Service Found": {
+      "main": [
+        [
+          {
+            "node": "IF Service Bookable",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 404 Unknown Service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Service Bookable": {
+      "main": [
+        [
+          {
+            "node": "Resolve Slot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 409 Service Not Bookable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Slot": {
+      "main": [
+        [
+          {
+            "node": "Find Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Normalize Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Duplicate": {
+      "main": [
+        [
+          {
+            "node": "IF Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 Already Booked",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Table Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Table Conflict": {
+      "main": [
+        [
+          {
+            "node": "Normalize Table Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Table Conflict": {
+      "main": [
+        [
+          {
+            "node": "IF Table Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Table Conflict": {
+      "main": [
+        [
+          {
+            "node": "Respond 409 Slot Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF Calendar Configured",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Calendar Configured": {
+      "main": [
+        [
+          {
+            "node": "Get Conflicting Events",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Insert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Conflicting Events": {
+      "main": [
+        [
+          {
+            "node": "Check Calendar Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Calendar Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Calendar Conflict": {
+      "main": [
+        [
+          {
+            "node": "IF Calendar Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Calendar Conflict": {
+      "main": [
+        [
+          {
+            "node": "Respond 409 Slot Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Prepare Insert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Calendar Write Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Insert": {
+      "main": [
+        [
+          {
+            "node": "Insert Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Appointment": {
+      "main": [
+        [
+          {
+            "node": "Verify Saved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF Had Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Saved": {
+      "main": [
+        [
+          {
+            "node": "IF Saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Saved": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 Booked",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF Had Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Had Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Rollback Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Booking Not Saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rollback Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Build Not Confirmed Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Not Confirmed Response": {
+      "main": [
+        [
+          {
+            "node": "Respond 502 Not Confirmed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "REPLACE_ON_IMPORT"
+  },
+  "tags": []
+}

@@ -1,0 +1,123 @@
+{
+  "_readme": [
+    "THIS FILE IS THE ENTIRE ONBOARDING SURFACE FOR A NEW BUSINESS.",
+    "",
+    "To put the AI receptionist on a new business:",
+    "  1. Copy this file to businesses/<their-slug>.json",
+    "  2. Fill it in (delete this _readme block)",
+    "  3. Run: node scripts/build-agent.mjs <their-slug>",
+    "  4. Paste the generated prompt + tools into your voice provider",
+    "",
+    "No code changes. Nothing else to touch. Every field below is optional",
+    "except `slug` and `profile.name` — leave anything out and the agent",
+    "degrades gracefully (it says 'let me have someone call you back'",
+    "instead of inventing an answer).",
+    "",
+    "Defaults are tuned for Indian businesses: IST, INR, +91, Hinglish."
+  ],
+
+  "slug": "example-business",
+
+  "profile": {
+    "name": "Example Business Pvt Ltd",
+    "type": "dental clinic",
+    "tagline": "Family dentistry in Malviya Nagar since 2012",
+    "city": "Jaipur",
+    "address": "Shop 14, Malviya Nagar, Jaipur, Rajasthan 302017",
+    "landmark": "opposite the Axis Bank ATM",
+    "publicPhone": "+911412345678",
+    "timezone": "Asia/Kolkata",
+    "currency": "INR",
+    "languages": ["hi", "en"]
+  },
+
+  "agent": {
+    "name": "Priya",
+    "role": "receptionist",
+    "persona": "warm, patient, and efficient; speaks naturally and never sounds robotic",
+    "greeting": "",
+    "maxCallMinutes": 6
+  },
+
+  "hours": {
+    "monday": { "open": "10:00", "close": "20:00" },
+    "tuesday": { "open": "10:00", "close": "20:00" },
+    "wednesday": { "open": "10:00", "close": "20:00" },
+    "thursday": { "open": "10:00", "close": "20:00" },
+    "friday": { "open": "10:00", "close": "20:00" },
+    "saturday": { "open": "10:00", "close": "18:00" },
+    "sunday": null,
+    "breaks": [{ "start": "14:00", "end": "15:00", "label": "lunch" }],
+    "closedDates": [{ "date": "2026-10-20", "reason": "Diwali" }]
+  },
+
+  "offerings": [
+    {
+      "name": "Consultation",
+      "aliases": ["checkup", "check up", "jaanch"],
+      "price": 300,
+      "priceType": "exact",
+      "durationMinutes": 20,
+      "bookable": true,
+      "notes": "Waived if you go ahead with treatment the same day."
+    },
+    {
+      "name": "Root Canal",
+      "aliases": ["rct"],
+      "price": 5000,
+      "priceType": "from",
+      "durationMinutes": 60,
+      "bookable": true,
+      "notes": "Final cost depends on which tooth and how many sittings."
+    },
+    {
+      "name": "Braces",
+      "price": null,
+      "priceType": "on_request",
+      "bookable": false,
+      "notes": "Needs an in-person assessment before we can quote."
+    }
+  ],
+
+  "faqs": [
+    {
+      "q": "Do you have parking?",
+      "a": "Yes, there's free two-wheeler parking right outside and paid four-wheeler parking in the basement."
+    },
+    {
+      "q": "Do you accept insurance or cashless?",
+      "a": "We accept cash, UPI, and all major cards. We're not on cashless insurance panels yet, but we give a proper invoice you can claim with."
+    }
+  ],
+
+  "policies": {
+    "canQuotePrices": true,
+    "canBook": true,
+    "canCancel": false,
+    "neverDiscuss": [
+      "medical advice or diagnosis over the phone",
+      "guaranteed treatment outcomes",
+      "comparisons with other clinics"
+    ],
+    "extraRules": [
+      "If someone describes severe pain, bleeding, or swelling, tell them to come in immediately or visit the nearest emergency room — do not try to assess it."
+    ]
+  },
+
+  "escalation": {
+    "transferNumber": "+919876543210",
+    "transferPolicy": "business_hours_only",
+    "triggers": [
+      "caller explicitly asks for a human, the owner, or the doctor",
+      "caller is upset, angry, or making a complaint",
+      "anything involving a refund or a billing dispute",
+      "a medical or safety emergency"
+    ]
+  },
+
+  "capture": {
+    "askFor": ["name", "phone", "reason"],
+    "notifyEmail": "",
+    "notifyWhatsapp": ""
+  }
+}

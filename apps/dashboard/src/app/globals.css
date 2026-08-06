@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 240 10% 12%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 12%;
+
+  --border: 240 6% 90%;
+
+  --muted: 240 5% 96%;
+  --muted-foreground: 240 4% 46%;
+
+  /* Accent = indigo */
+  --accent: 243 75% 59%;
+  --accent-foreground: 0 0% 100%;
+  --accent-soft: 243 100% 96%;
+
+  --success: 152 60% 36%;
+  --success-soft: 152 60% 94%;
+
+  --warning: 32 95% 44%;
+  --warning-soft: 32 100% 94%;
+
+  --danger: 0 72% 51%;
+  --danger-soft: 0 100% 96%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: hsl(240 5% 84%);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-track {
+  background-color: transparent;
+}

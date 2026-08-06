@@ -1,0 +1,588 @@
+{
+  "name": "ReceptionFlow - get_business_info",
+  "nodes": [
+    {
+      "id": "44521545-8174-4323-8e70-67c4660dca24",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1100,
+        -300
+      ],
+      "parameters": {
+        "width": 720,
+        "height": 220,
+        "content": "## get_business_info (new)\n`POST /webhook/get-business-info`\n\n**Body:** `business_id`\n\nThe first tool call on every call (see config/vapi-system-prompt.md). Loads this business's approved, public-facing facts -- name, industry, languages, hours, address/directions, a light service list, approved FAQs, whether booking is enabled, and restricted topics. Everything returned here is scoped to the resolved business_id; no cross-business data is ever included."
+      }
+    },
+    {
+      "id": "ad360120-618a-46d0-b49b-3d44c5c910b5",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1060,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "get-business-info",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "webhookId": "get-business-info-placeholder",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_N8N_GATEWAY_HEADER_AUTH_CREDENTIAL",
+          "name": "ReceptionFlow Gateway Shared Secret (placeholder)"
+        }
+      }
+    },
+    {
+      "id": "fa6a4d8d-e283-4892-af59-0e494921196f",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -840,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// get_business_info — Validate Input\nconst body = $input.first().json.body || {};\nconst businessId = String(body.business_id ?? '').trim();\n\nconst errors = [];\nif (!businessId) errors.push('business_id is required');\n\nreturn [{ json: { valid: errors.length === 0, errors, business_id_input: businessId } }];"
+      }
+    },
+    {
+      "id": "d261cf96-f20a-4865-89c0-097f039ac71b",
+      "name": "IF Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -620,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "66a15bd2-06c3-43cb-8f09-bb8c9003d5c8",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "b80d358f-3f38-4a24-a30e-87762088f114",
+      "name": "Respond 400 Invalid Input",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -400,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"invalid_input\", \"message\": \"business_id is required.\", \"details\": $json.errors } }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "2fa27029-f309-4dda-991c-3517639b7c56",
+      "name": "Get Business",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/businesses",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id,name,address,phone,timezone,hours_text,business_slug"
+            },
+            {
+              "name": "business_slug",
+              "value": "={{ \"eq.\" + $json.business_id_input }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "15b3bc69-3a78-46da-ab88-1c2d359b54b8",
+      "name": "Respond 502 Supabase Unavailable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -180,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"supabase_unavailable\", \"message\": \"Could not reach Supabase.\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "3faf8b78-e13e-4126-ae7e-cf429e83a54c",
+      "name": "Normalize Business",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// Normalize Business\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\n\nreturn [{\n  json: {\n    business_found: !!row,\n    business_id: row ? row.id : null,\n    business_name: row ? row.name : null,\n    address: row ? row.address : null,\n    phone_display: row ? row.phone : null,\n    timezone: row ? row.timezone : null,\n    hours_text: row ? row.hours_text : null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "b2c3eea9-f456-4a10-a819-1c83435dab83",
+      "name": "IF Business Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        40,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "44e2befd-4452-4455-abf8-64ef5ec7b033",
+              "leftValue": "={{ $json.business_found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "6c6f2701-ff41-4257-ad4a-07ab427d7efa",
+      "name": "Respond 404 Unknown Business",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        260,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"unknown_business\", \"message\": \"No business is registered with that business_id.\" } }}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    },
+    {
+      "id": "b9798a9a-1413-4ed9-bbb2-b7245983678e",
+      "name": "Get Business Settings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/business_settings",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "*"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ \"eq.\" + $('Normalize Business').first().json.business_id }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "41749986-b025-4f37-92db-db726a16ab32",
+      "name": "Normalize Settings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// Normalize Settings\n// No settings row means this business hasn't been configured yet --\n// everything defaults to the most conservative, no-guessing option\n// (booking disabled, availability not tracked, no restricted topics\n// beyond the universal ones the prompt template already enforces).\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.business_id ? items[0].json : null;\n\nreturn [{\n  json: {\n    industry: row ? row.industry : null,\n    languages_supported: row && row.languages_supported ? row.languages_supported : ['English'],\n    default_language: row ? row.default_language : 'English',\n    currency: row ? row.currency : null,\n    directions_note: row ? row.directions_note : null,\n    opening_hours: row && row.opening_hours ? row.opening_hours : {},\n    booking_enabled: row ? !!row.booking_enabled : false,\n    availability_source: row ? row.availability_source : 'not_tracked',\n    restricted_topics: row && row.restricted_topics ? row.restricted_topics : [],\n  },\n}];"
+      }
+    },
+    {
+      "id": "c77b30d7-f3bd-4dfc-888f-eec11d592916",
+      "name": "Get Services",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        -220
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/services",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id,name,duration_minutes,bookable"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ \"eq.\" + $('Normalize Business').first().json.business_id }}"
+            },
+            {
+              "name": "active",
+              "value": "eq.true"
+            },
+            {
+              "name": "order",
+              "value": "name.asc"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "b6beff51-730f-4dc4-a6d6-2b821703ecd4",
+      "name": "Get Faqs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        100
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/faqs",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "question,answer"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ \"eq.\" + $('Normalize Business').first().json.business_id }}"
+            },
+            {
+              "name": "active",
+              "value": "eq.true"
+            },
+            {
+              "name": "order",
+              "value": "created_at.asc"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "4a91e793-a8be-4060-9638-8fd84035f353",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// get_business_info — Build Response\n// Services and FAQs use onError = continueRegularOutput above (rather\n// than the usual error-branching pattern): a business with no rows yet\n// in either table is a normal, valid state -- not a failure -- so this\n// just treats a failed/empty fetch as an empty list instead of erroring\n// the whole call. Hours/directions/services/FAQs are the only things the\n// assistant is allowed to speak from; nothing here is invented.\nconst business = $('Normalize Business').first().json;\nconst settings = $('Normalize Settings').first().json;\n\nlet services = [];\ntry {\n  services = $('Get Services').all().map((i) => i.json).filter((s) => s && s.id)\n    .map((s) => ({ name: s.name, duration_minutes: s.duration_minutes, bookable: !!s.bookable }));\n} catch (e) {\n  services = [];\n}\n\nlet faqs = [];\ntry {\n  faqs = $('Get Faqs').all().map((i) => i.json).filter((f) => f && f.question);\n} catch (e) {\n  faqs = [];\n}\n\nreturn [{\n  json: {\n    business_id: $('Validate Input').first().json.business_id_input,\n    business_name: business.business_name,\n    industry: settings.industry,\n    languages_supported: settings.languages_supported,\n    default_language: settings.default_language,\n    timezone: business.timezone,\n    currency: settings.currency,\n    contact: {\n      address: business.address,\n      phone_display: business.phone_display,\n      directions_note: settings.directions_note,\n    },\n    opening_hours: settings.opening_hours,\n    hours_text: business.hours_text,\n    services,\n    faqs,\n    booking: { enabled: settings.booking_enabled },\n    availability_source: settings.availability_source,\n    restricted_topics: settings.restricted_topics,\n  },\n}];"
+      }
+    },
+    {
+      "id": "3c820737-41e1-4114-a649-e822ef749edb",
+      "name": "Respond 200 Info",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        920,
+        -60
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "IF Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Valid": {
+      "main": [
+        [
+          {
+            "node": "Get Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400 Invalid Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business": {
+      "main": [
+        [
+          {
+            "node": "Normalize Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Business": {
+      "main": [
+        [
+          {
+            "node": "IF Business Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Business Found": {
+      "main": [
+        [
+          {
+            "node": "Get Business Settings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 404 Unknown Business",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business Settings": {
+      "main": [
+        [
+          {
+            "node": "Normalize Settings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Settings": {
+      "main": [
+        [
+          {
+            "node": "Get Services",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Services": {
+      "main": [
+        [
+          {
+            "node": "Get Faqs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Faqs": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "REPLACE_ON_IMPORT"
+  },
+  "tags": []
+}

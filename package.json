@@ -1,0 +1,30 @@
+{
+  "name": "receptionflow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI phone receptionist for Indian small businesses. Onboarding a business is one JSON file.",
+  "engines": {
+    "node": ">=18"
+  },
+  "//deps": "No dependencies, and there should never be any. The prototype stack runs on bare Node so that a clone is a working demo with no install step. apps/dashboard has its own package.json and is the only part of this repo that installs anything — deliberately NOT an npm workspace, so `npm install` at the root stays a no-op and the two stacks cannot drift into each other's node_modules.",
+  "//windows": "No script sets an environment variable inline (FOO=1 node ...) because that is a syntax error in cmd.exe. Anything that would need one is a CLI flag instead.",
+  "scripts": {
+    "start": "node apps/agent-server/server.mjs",
+    "console": "node apps/agent-server/server.mjs",
+    "gateway": "node apps/voice-gateway/server.mjs",
+    "gateway:mock": "node apps/voice-gateway/server.mjs --mock",
+    "simulate": "node scripts/simulate-call.mjs",
+    "build:agent": "node scripts/build-agent.mjs",
+    "check": "node scripts/build-agent.mjs --check",
+    "test": "npm run check && npm run test:core && npm run test:voice && npm run test:env",
+    "test:core": "node packages/agent-core/agent-core.test.mjs",
+    "test:voice": "node packages/voice/voice.test.mjs",
+    "test:env": "node packages/env/env.test.mjs",
+    "test:gateway": "npm --prefix apps/dashboard run test:gateway",
+    "doctor": "node scripts/doctor.mjs",
+    "dashboard": "npm --prefix apps/dashboard run dev",
+    "dashboard:install": "npm --prefix apps/dashboard install",
+    "dashboard:build": "npm --prefix apps/dashboard run build"
+  }
+}

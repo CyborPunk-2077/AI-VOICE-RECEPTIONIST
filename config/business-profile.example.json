@@ -1,0 +1,132 @@
+{
+  "_about": "ReceptionFlow — example business profile for the reusable voice-agent template. This is FICTIONAL EXAMPLE DATA (Lumen Salon), used only to show every field the template and its tools expect. See docs/client-onboarding.md for how to create a real profile for a new client, and docs/voice-agent.md for how each field is used by the system prompt and the 7 tools in config/vapi-tools.json. Keys starting with an underscore are documentation-only; a real profile doesn't need them.",
+
+  "business_id": "lumen-salon-blr-01",
+  "business_name": "Lumen Salon",
+  "industry": "salon",
+  "_industry_note": "Free text, but keep it short — it's spoken in the greeting (e.g. 'a salon', 'a dental clinic', 'a gym'). Other examples: clinic, gym, spa, coaching_center, restaurant.",
+
+  "locale": {
+    "languages_supported": ["Hindi", "Hinglish", "English"],
+    "default_language": "Hinglish",
+    "timezone": "Asia/Kolkata",
+    "currency": "INR"
+  },
+
+  "contact": {
+    "address": "214 Brigade Road, Bengaluru, Karnataka 560025",
+    "phone_display": "+91REPLACE_WITH_BUSINESS_PHONE_DISPLAY",
+    "directions_note": "Ground floor, next to Cafe Leaf, opposite the metro station exit. Parking is on the street; there is no dedicated lot."
+  },
+
+  "opening_hours": {
+    "timezone": "Asia/Kolkata",
+    "schedule": [
+      { "day": "Monday", "closed": false, "open": "10:00", "close": "20:00" },
+      { "day": "Tuesday", "closed": false, "open": "10:00", "close": "20:00" },
+      { "day": "Wednesday", "closed": false, "open": "10:00", "close": "20:00" },
+      { "day": "Thursday", "closed": false, "open": "10:00", "close": "20:00" },
+      { "day": "Friday", "closed": false, "open": "10:00", "close": "20:00" },
+      { "day": "Saturday", "closed": false, "open": "10:00", "close": "20:00" },
+      { "day": "Sunday", "closed": true }
+    ],
+    "break": { "start": "14:00", "end": "15:00", "note": "Staff lunch break — no walk-ins or appointments seated during this window." },
+    "notes": "Closed on public holidays; the agent should mention this is possible but not guess specific dates unless told."
+  },
+
+  "services": [
+    {
+      "id": "svc-haircut",
+      "name": "Haircut",
+      "description": "Wash, cut, and style with a senior stylist.",
+      "duration_minutes": 45,
+      "price_disclosure": "exact",
+      "price_inr": 400,
+      "price_range_inr": null
+    },
+    {
+      "id": "svc-haircut-beard",
+      "name": "Haircut and beard",
+      "description": "Haircut plus beard trim and shape-up.",
+      "duration_minutes": 60,
+      "price_disclosure": "exact",
+      "price_inr": 550,
+      "price_range_inr": null
+    },
+    {
+      "id": "svc-color",
+      "name": "Hair colour",
+      "description": "Global or partial colour; product and technique vary by hair length and condition.",
+      "duration_minutes": 90,
+      "price_disclosure": "range",
+      "price_inr": null,
+      "price_range_inr": "1200-3500"
+    },
+    {
+      "id": "svc-consultation",
+      "name": "Consultation",
+      "description": "One-on-one consultation to plan a cut, colour, or style change.",
+      "duration_minutes": 30,
+      "price_disclosure": "not_disclosed",
+      "price_inr": null,
+      "price_range_inr": null
+    }
+  ],
+
+  "price_policy": {
+    "default_disclosure": "exact",
+    "disclaimer_note": "Prices may vary with hair length, product used, or stylist seniority — always add this note when quoting anything other than a flat exact price."
+  },
+
+  "faqs": [
+    { "question": "Do you accept card and UPI payments?", "answer": "Yes, we accept cash, all major cards, and UPI." },
+    { "question": "Do you take walk-ins?", "answer": "Yes, walk-ins are welcome, but booking ahead means less waiting." },
+    { "question": "Is parking available?", "answer": "Parking is on the street only; there is no dedicated lot." }
+  ],
+
+  "availability": {
+    "source": "google_calendar",
+    "_source_options": "google_calendar | staff_roster | not_tracked — see docs/voice-agent.md for how each is handled by get_availability.",
+    "staff": [
+      { "name": "Priya", "role": "Senior Stylist", "services": ["svc-haircut", "svc-haircut-beard", "svc-color"] },
+      { "name": "Arjun", "role": "Stylist", "services": ["svc-haircut", "svc-consultation"] }
+    ]
+  },
+
+  "booking": {
+    "enabled": true,
+    "bookable_services": ["svc-haircut", "svc-haircut-beard", "svc-consultation"],
+    "_bookable_services_note": "Hair colour (svc-color) is intentionally excluded here — this business only takes colour bookings in person, so the agent should offer a callback/lead request for it instead.",
+    "confirmation_channel": "sms",
+    "_confirmation_channel_note": "Placeholder — no SMS/WhatsApp provider is connected yet. See docs/voice-agent.md."
+  },
+
+  "callback": {
+    "callback_number": "+91REPLACE_WITH_BUSINESS_NOTIFY_NUMBER",
+    "notify_channel": "sms",
+    "_notify_channel_note": "Placeholder — where the business is notified about a new callback/lead request. Not wired to a real provider."
+  },
+
+  "transfer_rules": {
+    "transfer_number": "+91REPLACE_WITH_HUMAN_TRANSFER_NUMBER",
+    "universal_triggers": [
+      "explicit_human_request",
+      "emergency_or_distress",
+      "complaint",
+      "payment_dispute",
+      "unknown_or_sensitive_question"
+    ],
+    "additional_triggers": [
+      "requests for a specific chemical treatment's safety or allergy risk",
+      "requests to negotiate or discount a price beyond what's listed"
+    ]
+  },
+
+  "restricted_topics": [
+    "medical, allergy, or health claims about any product or treatment",
+    "legal advice",
+    "guaranteed results of any service",
+    "discounts or pricing not listed in services or price_policy",
+    "anything about staff not listed in availability.staff"
+  ]
+}

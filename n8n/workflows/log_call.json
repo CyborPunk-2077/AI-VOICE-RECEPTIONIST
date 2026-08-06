@@ -1,0 +1,644 @@
+{
+  "name": "ReceptionFlow - log_call",
+  "nodes": [
+    {
+      "id": "61418c4d-bb50-48cf-aaf5-68b7fe06bc62",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1000,
+        -340
+      ],
+      "parameters": {
+        "width": 760,
+        "height": 240,
+        "content": "## log_call\n`POST /webhook/log-call`\n\n**Body:** `business_id`, `caller_number`, `intent`, `outcome`, `call_summary`, `booking_id` (optional), `duration_seconds` (optional)\n\n`intent`/`outcome` are mapped onto the exact values the `calls` CHECK constraints allow (supabase/migrations/0002_multi_business.sql widens these to a superset of the original salon-only values) -- unrecognised values are rejected, never guessed. `business_id` is required and resolved before anything is written, and the booking-link patch is scoped to the same business so one business's call can never attach itself to another business's appointment. Failing to link a booking does not un-log the call; it is reported as `booking_link: \"failed\"`."
+      }
+    },
+    {
+      "id": "17ef31b3-0caf-4844-bb98-57f3b608114e",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "log-call",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "webhookId": "log-call-placeholder",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_N8N_GATEWAY_HEADER_AUTH_CREDENTIAL",
+          "name": "ReceptionFlow Gateway Shared Secret (placeholder)"
+        }
+      }
+    },
+    {
+      "id": "4cf60003-a014-40d6-b2b1-ab167c952c30",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -740,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// log_call — Validate Input\n// Expected body: { business_id, caller_number, intent, outcome,\n//                  call_summary, booking_id?, duration_seconds? }\n//\n// intent/outcome must land on the exact values the CHECK constraints on\n// `calls` allow (supabase/migrations/0001_init.sql + 0002_multi_business.sql).\n// A voice agent won't reliably send exact casing, so close variants are\n// mapped -- but anything not on the list is still an error, never guessed.\nconst INTENTS = {\n  faq: 'FAQ', question: 'FAQ', info: 'Info', information: 'Info',\n  booking: 'Booking', book: 'Booking', appointment: 'Booking',\n  callback: 'Callback', 'callback request': 'Callback', lead: 'Callback',\n  transfer: 'Transfer', human: 'Transfer',\n};\nconst OUTCOMES = {\n  'faq answered': 'FAQ Answered', faq_answered: 'FAQ Answered', answered: 'FAQ Answered',\n  'info provided': 'Info Provided', info_provided: 'Info Provided', info: 'Info Provided',\n  booked: 'Booked', booking: 'Booked',\n  'callback requested': 'Callback Requested', callback_requested: 'Callback Requested', callback: 'Callback Requested',\n  transferred: 'Transferred', transfer: 'Transferred',\n  'no match': 'No Match', no_match: 'No Match', nomatch: 'No Match',\n};\n\nconst body = $input.first().json.body || {};\n\nconst businessId = String(body.business_id ?? '').trim();\nconst callerNumber = String(body.caller_number ?? body.from ?? '').trim();\nconst rawIntent = String(body.intent ?? '').trim();\nconst rawOutcome = String(body.outcome ?? '').trim();\nconst summary = String(body.call_summary ?? body.summary ?? '').trim() || null;\nconst bookingId = String(body.booking_id ?? '').trim() || null;\n\nconst rawDuration = body.duration_seconds;\nconst hasDuration = rawDuration !== undefined && rawDuration !== null && rawDuration !== '';\nconst durationSeconds = hasDuration ? Number(rawDuration) : null;\n\nconst intent = INTENTS[rawIntent.toLowerCase()] || null;\nconst outcome = OUTCOMES[rawOutcome.toLowerCase()] || null;\n\nconst errors = [];\nif (!businessId) errors.push('business_id is required');\nif (!callerNumber) errors.push('caller_number is required');\n\nif (!rawIntent) {\n  errors.push('intent is required');\n} else if (!intent) {\n  errors.push('intent must be one of: FAQ, Booking, Transfer, Info, Callback');\n}\n\nif (!rawOutcome) {\n  errors.push('outcome is required');\n} else if (!outcome) {\n  errors.push('outcome must be one of: FAQ Answered, Booked, Transferred, No Match, Info Provided, Callback Requested');\n}\n\nif (hasDuration && (!Number.isFinite(durationSeconds) || durationSeconds < 0)) {\n  errors.push('duration_seconds must be a non-negative number');\n}\n\nif (bookingId && !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(bookingId)) {\n  errors.push('booking_id must be a UUID');\n}\n\nconst endedAt = DateTime.now();\nconst startedAt =\n  Number.isFinite(durationSeconds) && durationSeconds > 0\n    ? endedAt.minus({ seconds: durationSeconds })\n    : endedAt;\n\nreturn [{\n  json: {\n    valid: errors.length === 0,\n    errors,\n    business_id_input: businessId,\n    caller_number: callerNumber,\n    intent,\n    outcome,\n    call_summary: summary,\n    booking_id: bookingId,\n    duration_seconds: Number.isFinite(durationSeconds) ? durationSeconds : null,\n    started_at: startedAt.toISO(),\n    ended_at: endedAt.toISO(),\n  },\n}];"
+      }
+    },
+    {
+      "id": "038f9532-a05f-495c-b89c-24eb973ccabc",
+      "name": "IF Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -520,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "68097d48-7c6a-407c-85b0-ca0e080c40e1",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "167a26c8-91ba-45a1-bd96-b5c5fe16a8cf",
+      "name": "Respond 400 Invalid Input",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -300,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"invalid_input\", \"logged\": false, \"status\": \"error\", \"call_id\": null, \"message\": \"The call log request was missing or malformed fields.\", \"details\": $json.errors } }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "1ce25d2d-cdd8-4943-8a1a-0456cefaccaf",
+      "name": "Get Business",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -300,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/businesses",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id"
+            },
+            {
+              "name": "business_slug",
+              "value": "={{ \"eq.\" + $json.business_id_input }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "fca4cd5c-30f6-4816-b77e-11f147c357da",
+      "name": "Respond 502 Supabase Unavailable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -80,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"supabase_unavailable\", \"logged\": false, \"status\": \"error\", \"call_id\": null, \"message\": \"Could not reach Supabase, so the call was not logged.\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "c53d9553-15ee-41ee-87dc-5dbda0b02dd2",
+      "name": "Normalize Business",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// Normalize Business\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\n\nreturn [{ json: { business_found: !!row, business_id: row ? row.id : null } }];"
+      }
+    },
+    {
+      "id": "e6928036-3f7b-4319-9623-0116be815996",
+      "name": "IF Business Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        140,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "573cdd52-4077-4950-ab25-43f6b7060b43",
+              "leftValue": "={{ $json.business_found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "1f37e5ae-e120-4e0a-bd37-50466fde60e1",
+      "name": "Respond 404 Unknown Business",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        360,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"unknown_business\", \"logged\": false, \"status\": \"error\", \"call_id\": null, \"message\": \"No business is registered with that business_id.\" } }}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    },
+    {
+      "id": "4cb3a69c-0abb-46f9-9b70-2b96c5ba8303",
+      "name": "Insert Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        360,
+        -60
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/calls",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"business_id\": $('Normalize Business').first().json.business_id, \"caller_number\": $('Validate Input').first().json.caller_number, \"intent\": $('Validate Input').first().json.intent, \"outcome\": $('Validate Input').first().json.outcome, \"summary\": $('Validate Input').first().json.call_summary, \"duration_seconds\": $('Validate Input').first().json.duration_seconds, \"started_at\": $('Validate Input').first().json.started_at, \"ended_at\": $('Validate Input').first().json.ended_at } }}",
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "41bdb040-547d-42eb-bb86-5883971b2205",
+      "name": "Respond 502 Log Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        580,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"call_not_logged\", \"logged\": false, \"status\": \"error\", \"call_id\": null, \"message\": \"The call record could not be written to Supabase.\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "c5a20c4c-44ce-481d-a224-5e616d906992",
+      "name": "Normalize Call",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        580,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// log_call — Normalize Call\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\n\nreturn [{ json: { logged: !!row, call_id: row ? row.id : null } }];"
+      }
+    },
+    {
+      "id": "c6228f65-5843-4852-82f9-263e2e046c5a",
+      "name": "IF Logged",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        800,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "910aef17-549a-47a4-9608-0a5ef4ea3ed3",
+              "leftValue": "={{ $json.logged }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "823eb2b3-5775-484d-896a-bda07ea3e436",
+      "name": "IF Booking Id Present",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1020,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "139e86b6-2459-439a-b0c2-4d643565ca89",
+              "leftValue": "={{ !!$('Validate Input').first().json.booking_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "194953c9-f5ed-4f19-9851-3a89256a1339",
+      "name": "Link Booking To Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1240,
+        -180
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/appointments",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"call_id\": $('Normalize Call').first().json.call_id } }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "={{ \"eq.\" + $('Validate Input').first().json.booking_id }}"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ \"eq.\" + $('Normalize Business').first().json.business_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "4b2d9da9-b2fd-4d5b-afd6-971b27949dff",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// log_call — Build Response\n// Fed by three branches (no booking to link, link succeeded, link\n// failed), so call_id is read from the node that always has it. Failing\n// to attach the call to its appointment does not un-log the call: the\n// call row is the audit record and exists either way. The booking-link\n// PATCH above is scoped to this same business_id, so a booking_id from a\n// different business can never be linked here.\nconst call = $('Normalize Call').first().json;\nconst input = $('Validate Input').first().json;\n\nlet bookingLink = 'not_requested';\nif (input.booking_id) {\n  const item = $input.first();\n  const linkFailed = !!(item && item.json && item.json.error);\n  const linkedRow = !!(item && item.json && item.json.id);\n  bookingLink = linkFailed ? 'failed' : linkedRow ? 'linked' : 'not_found';\n}\n\nreturn [{\n  json: {\n    status: 'logged',\n    logged: true,\n    call_id: call.call_id,\n    business_id: input.business_id_input,\n    caller_number: input.caller_number,\n    intent: input.intent,\n    outcome: input.outcome,\n    booking_id: input.booking_id,\n    booking_link: bookingLink,\n  },\n}];"
+      }
+    },
+    {
+      "id": "f565935a-eac1-4a29-829f-9efa31a41091",
+      "name": "Respond 200 Logged",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        -60
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "IF Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Valid": {
+      "main": [
+        [
+          {
+            "node": "Get Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400 Invalid Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business": {
+      "main": [
+        [
+          {
+            "node": "Normalize Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Business": {
+      "main": [
+        [
+          {
+            "node": "IF Business Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Business Found": {
+      "main": [
+        [
+          {
+            "node": "Insert Call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 404 Unknown Business",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Call": {
+      "main": [
+        [
+          {
+            "node": "Normalize Call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Log Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Call": {
+      "main": [
+        [
+          {
+            "node": "IF Logged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Logged": {
+      "main": [
+        [
+          {
+            "node": "IF Booking Id Present",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Log Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Booking Id Present": {
+      "main": [
+        [
+          {
+            "node": "Link Booking To Call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Link Booking To Call": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 Logged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "REPLACE_ON_IMPORT"
+  },
+  "tags": []
+}

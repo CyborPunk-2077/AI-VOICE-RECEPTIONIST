@@ -1,0 +1,437 @@
+{
+  "name": "ReceptionFlow - send_confirmation",
+  "nodes": [
+    {
+      "id": "6a0d1cf8-9169-4777-823a-4bc6e50014a1",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1080,
+        -320
+      ],
+      "parameters": {
+        "width": 760,
+        "height": 240,
+        "content": "## send_confirmation\n`POST /webhook/send-confirmation`\n\n**Body:** `business_id` plus the appointment data returned by `create_booking`.\n\nNo longer a Vapi-facing tool in the template (create_booking_optional's own workflow is where a real confirmation would be triggered -- see docs/voice-agent.md) but kept and updated here as a standalone internal endpoint. Now requires and resolves `business_id` so the confirmation text uses the real business name instead of a hardcoded one, and so an unknown business_id is rejected rather than silently sending a message with the wrong name. The Twilio node is still a **placeholder** -- no credential, no from-number. It fails on every call and the response honestly says `sent: false`."
+      }
+    },
+    {
+      "id": "f7c1a74f-3d2c-44d0-9ae9-a2d430bc1905",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1040,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-confirmation",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "webhookId": "send-confirmation-placeholder",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_N8N_GATEWAY_HEADER_AUTH_CREDENTIAL",
+          "name": "ReceptionFlow Gateway Shared Secret (placeholder)"
+        }
+      }
+    },
+    {
+      "id": "d5814a42-bebf-4c74-ba0c-b73db9f7f295",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -820,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// send_confirmation — Validate Input\n// Expected body: { business_id, booking_id, customer_name, customer_phone,\n//   service, appointment_start, appointment_label }\nconst body = $input.first().json.body || {};\n\nconst businessId = String(body.business_id ?? '').trim();\nconst bookingId = String(body.booking_id ?? '').trim();\nconst customerName = String(body.customer_name ?? body.name ?? '').trim();\nconst customerPhone = String(body.customer_phone ?? body.phone ?? '').trim();\nconst service = String(body.service ?? body.service_name ?? '').trim();\nconst startTime = String(body.appointment_start ?? body.start_time ?? '').trim();\nconst providedLabel = String(body.appointment_label ?? '').trim();\n\nconst errors = [];\nif (!businessId) errors.push('business_id is required');\nif (!bookingId) errors.push('booking_id is required');\nif (!customerName) errors.push('customer_name is required');\nif (!customerPhone) errors.push('customer_phone is required');\nif (!service) errors.push('service is required');\n\nlet start = null;\nif (!startTime) {\n  errors.push('appointment_start is required');\n} else {\n  start = DateTime.fromISO(startTime, { setZone: true });\n  if (!start.isValid) errors.push('appointment_start must be a valid ISO 8601 date and time');\n}\n\nreturn [{\n  json: {\n    valid: errors.length === 0,\n    errors,\n    business_id_input: businessId,\n    booking_id: bookingId,\n    customer_name: customerName,\n    customer_phone: customerPhone,\n    service,\n    appointment_start: start && start.isValid ? start.toISO() : null,\n    appointment_label_provided: providedLabel || null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "714acf35-643e-475d-aaac-6b74e0ce47d8",
+      "name": "IF Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -600,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "56ee987a-97be-4589-99be-4059ecea811e",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "cfa82ea9-c723-4df0-a76a-891bfe5b7049",
+      "name": "Respond 400 Invalid Input",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -380,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"invalid_input\", \"status\": \"not_sent\", \"sent\": false, \"message\": \"The confirmation request was missing or malformed fields.\", \"details\": $json.errors } }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "c201e153-3601-422f-b89a-007675fd671e",
+      "name": "Get Business",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -380,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/businesses",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id,name,timezone"
+            },
+            {
+              "name": "business_slug",
+              "value": "={{ \"eq.\" + $json.business_id_input }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "4e56c4ee-66d7-49ff-b070-1fe2da24ce66",
+      "name": "Respond 502 Supabase Unavailable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -160,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"supabase_unavailable\", \"status\": \"not_sent\", \"sent\": false, \"message\": \"Could not reach Supabase to resolve this business.\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "067a778f-e9a2-44ff-a099-134cddd1d246",
+      "name": "Normalize Business",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// Normalize Business\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\n\nreturn [{\n  json: {\n    business_found: !!row,\n    business_name: row ? row.name : null,\n    business_timezone: row ? row.timezone : null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "2f68aa5b-854d-4bda-8f7e-da01807d6385",
+      "name": "IF Business Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        60,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fb914cb0-bd79-4cd6-8914-8aaa40d4cd03",
+              "leftValue": "={{ $json.business_found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "003ded2c-6fed-44e7-9d52-da611a1f0ffc",
+      "name": "Respond 404 Unknown Business",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        280,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"unknown_business\", \"status\": \"not_sent\", \"sent\": false, \"message\": \"No business is registered with that business_id.\" } }}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    },
+    {
+      "id": "051efb5f-e745-4d74-98a7-0c841feb0116",
+      "name": "Build Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// send_confirmation — Build Message\nconst input = $('Validate Input').first().json;\nconst business = $('Normalize Business').first().json;\n\nconst label =\n  input.appointment_label_provided ||\n  (input.appointment_start\n    ? DateTime.fromISO(input.appointment_start, { setZone: true })\n        .setZone(business.business_timezone || 'UTC')\n        .toFormat(\"cccc, LLLL d 'at' h:mm a\")\n    : input.appointment_start);\n\nconst messageText =\n  business.business_name + ': Hi ' + input.customer_name + \", you're booked for \" + input.service +\n  ' on ' + label + '. Call us back if you need to change anything.';\n\nreturn [{ json: { message_text: messageText, appointment_label: label } }];"
+      }
+    },
+    {
+      "id": "7948e2d5-313f-477b-b662-220a574f6aae",
+      "name": "Send SMS (Placeholder)",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        500,
+        -60
+      ],
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "Placeholder only. No Twilio credential or phone number is configured.",
+      "parameters": {
+        "resource": "sms",
+        "operation": "send",
+        "from": "REPLACE_WITH_YOUR_TWILIO_FROM_NUMBER",
+        "to": "={{ $('Validate Input').first().json.customer_phone }}",
+        "message": "={{ $json.message_text }}",
+        "options": {}
+      },
+      "credentials": {
+        "twilioApi": {
+          "id": "REPLACE_WITH_YOUR_TWILIO_CREDENTIAL",
+          "name": "Twilio account (placeholder - not configured)"
+        }
+      }
+    },
+    {
+      "id": "9a0a33b2-2526-4ecc-bbc8-1be04cd3d780",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// send_confirmation — Build Response\n// The Twilio node is a placeholder: no credential, no From number, and\n// runs with onError = continueRegularOutput. Until a real Twilio account\n// is wired up it fails on every call and lands here as an item carrying\n// an `error`, reported honestly as not_sent rather than dressed up as a\n// success.\nconst item = $input.first();\nconst failed = !!(item && item.json && item.json.error);\n\nconst input = $('Validate Input').first().json;\nconst built = $('Build Message').first().json;\n\nreturn [{\n  json: {\n    booking_id: input.booking_id,\n    business_id: input.business_id_input,\n    status: failed ? 'not_sent' : 'sent',\n    sent: !failed,\n    channel: 'sms',\n    to: input.customer_phone,\n    message_text: built.message_text,\n    detail: failed\n      ? 'Twilio is not configured yet, so no SMS was sent. The booking itself is unaffected. See docs/n8n-setup.md.'\n      : 'Confirmation SMS handed to Twilio.',\n  },\n}];"
+      }
+    },
+    {
+      "id": "7c363607-2103-4f83-bc1c-59e27b21f098",
+      "name": "Respond 200 Status",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        940,
+        -60
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "IF Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Valid": {
+      "main": [
+        [
+          {
+            "node": "Get Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400 Invalid Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business": {
+      "main": [
+        [
+          {
+            "node": "Normalize Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Business": {
+      "main": [
+        [
+          {
+            "node": "IF Business Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Business Found": {
+      "main": [
+        [
+          {
+            "node": "Build Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 404 Unknown Business",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Message": {
+      "main": [
+        [
+          {
+            "node": "Send SMS (Placeholder)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send SMS (Placeholder)": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "REPLACE_ON_IMPORT"
+  },
+  "tags": []
+}

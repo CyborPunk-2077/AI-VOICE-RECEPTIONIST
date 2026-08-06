@@ -1,0 +1,941 @@
+{
+  "name": "ReceptionFlow - get_available_slots",
+  "nodes": [
+    {
+      "id": "b6e9ca31-17d7-40c2-9aed-3c03fd6f9a4c",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1600,
+        -420
+      ],
+      "parameters": {
+        "width": 760,
+        "height": 260,
+        "content": "## get_available_slots (legacy)\n`POST /webhook/get-available-slots`\n\n**Body:** `business_id`, `service`, `preferred_date` (YYYY-MM-DD), `preferred_time` (HH:MM, optional)\n\nKept for backward compatibility with the Phase-3 single-salon flow. The template's Vapi tools call `get_availability` instead (see `get_availability.json`), which also covers staff_roster and not_tracked businesses. This workflow now requires and validates `business_id`, filters every query by the resolved business, and reads hours/calendar from that business's own `business_settings` row instead of hardcoded constants. Returns 2 or 3 open slots, or an error object -- never a 1-slot list."
+      }
+    },
+    {
+      "id": "e0629671-f626-4cc3-ae61-6d304cece2eb",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1560,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "get-available-slots",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "webhookId": "get-available-slots-placeholder",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_N8N_GATEWAY_HEADER_AUTH_CREDENTIAL",
+          "name": "ReceptionFlow Gateway Shared Secret (placeholder)"
+        }
+      }
+    },
+    {
+      "id": "d0a33383-1b2e-4543-8ae0-1fce7dc1384b",
+      "name": "Validate Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1340,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// get_available_slots — Validate Format\n// Expected body: { business_id, service, preferred_date, preferred_time }\n// business_id is this business's public slug (supabase/migrations/0002_multi_business.sql).\n// Format-only checks here; preferred_date/time are re-checked against this\n// business's own timezone once it's resolved (see \"Resolve Date\").\nconst body = $input.first().json.body || {};\n\nconst businessId = String(body.business_id ?? '').trim();\nconst service = String(body.service ?? body.service_name ?? '').trim();\nconst preferredDate = String(body.preferred_date ?? '').trim();\nconst preferredTime = String(body.preferred_time ?? '').trim();\n\nconst DATE_RE = /^\\d{4}-\\d{2}-\\d{2}$/;\nconst TIME_RE = /^([01]\\d|2[0-3]):[0-5]\\d$/;\n\nconst errors = [];\nif (!businessId) errors.push('business_id is required');\nif (!service) errors.push('service is required');\n\nif (!preferredDate) {\n  errors.push('preferred_date is required (YYYY-MM-DD)');\n} else if (!DATE_RE.test(preferredDate)) {\n  errors.push('preferred_date must be formatted YYYY-MM-DD');\n}\n\nif (preferredTime && !TIME_RE.test(preferredTime)) {\n  errors.push('preferred_time must be 24-hour HH:MM (or omitted)');\n}\n\nreturn [{\n  json: {\n    valid: errors.length === 0,\n    errors,\n    business_id_input: businessId,\n    service,\n    preferred_date: preferredDate,\n    preferred_time: preferredTime || null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "f832baed-067d-4e26-b7ea-b5dd644b259f",
+      "name": "IF Valid Format",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1120,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8567506e-394d-4ab1-8248-047e5e70a19e",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "ef128ff3-019c-44e8-8568-647309038dc1",
+      "name": "Respond 400 Invalid Input",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -900,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"invalid_input\", \"message\": \"The request was missing or malformed fields.\", \"details\": $json.errors, \"slots\": [] } }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "b2aaf2d7-26ea-4c0c-b5d0-93ae90436e4f",
+      "name": "Get Business",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -900,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/businesses",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id,name,timezone,business_slug"
+            },
+            {
+              "name": "business_slug",
+              "value": "={{ \"eq.\" + $json.business_id_input }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "cf00a6c7-70cc-4ed2-9b55-83261bff92ad",
+      "name": "Respond 502 Supabase Unavailable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -680,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"supabase_unavailable\", \"message\": \"Could not reach Supabase.\", \"slots\": [] } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "f9522e72-ffd4-40b1-8fc1-08bd85bffa5c",
+      "name": "Normalize Business",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -680,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// Normalize Business\n// PostgREST returns [] for no match; alwaysOutputData turns that into a\n// single item with an empty json object, so presence of `.id` is the\n// reliable \"did we find a row\" test in both shapes.\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\n\nreturn [{\n  json: {\n    business_found: !!row,\n    business_id: row ? row.id : null,\n    business_name: row ? row.name : null,\n    business_timezone: row ? row.timezone : null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "fa2e97cc-1db3-47b5-b5c3-f739fd59bbf8",
+      "name": "IF Business Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -460,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "83cd0f12-f5c1-4736-bd0f-7f9a3c97f32c",
+              "leftValue": "={{ $json.business_found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "593afe8e-933d-48ad-8436-e06c88125a86",
+      "name": "Respond 404 Unknown Business",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -240,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"unknown_business\", \"message\": \"No business is registered with that business_id.\", \"slots\": [] } }}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    },
+    {
+      "id": "5a228fe4-ab14-4edc-bca9-556f338f3032",
+      "name": "Get Business Settings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/business_settings",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "*"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ \"eq.\" + $('Normalize Business').first().json.business_id }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "99c343ba-7b21-457b-9cb8-93b693794254",
+      "name": "Normalize Settings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -20,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// Normalize Settings\n// A missing settings row (business exists but hasn't been configured yet)\n// falls back to safe defaults -- no calendar id means the calendar step\n// fails honestly downstream instead of guessing one.\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.business_id ? items[0].json : null;\n\nreturn [{\n  json: {\n    settings_found: !!row,\n    calendar_id: row ? row.calendar_id : null,\n    opening_hours: row && row.opening_hours ? row.opening_hours : {},\n  },\n}];"
+      }
+    },
+    {
+      "id": "6afd774e-4661-4b4c-80cb-2ad175113bdc",
+      "name": "Resolve Date",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// get_available_slots — Resolve Date\n// Runs after the business (and its timezone) is resolved, so \"is this\n// date in the past\" is evaluated in the business's own timezone rather\n// than a hardcoded one.\nconst input = $('Validate Format').first().json;\nconst business = $('Normalize Business').first().json;\nconst tz = business.business_timezone || 'UTC';\n\nconst now = DateTime.now().setZone(tz);\nconst preferred = DateTime.fromISO(input.preferred_date + 'T' + (input.preferred_time || '00:00'), { zone: tz });\n\nconst errors = [];\nif (!preferred.isValid) {\n  errors.push('preferred_date/preferred_time is not a real date and time');\n} else if (preferred.startOf('day') < now.startOf('day')) {\n  errors.push('preferred_date is in the past');\n}\n\n// A time earlier today is a normal thing to say (\"this morning\") -- roll\n// forward to now rather than rejecting the request.\nconst searchFrom = preferred.isValid && preferred < now ? now : preferred;\n\nreturn [{\n  json: {\n    valid: errors.length === 0,\n    errors,\n    business_timezone: tz,\n    search_from_iso: searchFrom && searchFrom.isValid ? searchFrom.toISO() : null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "d55d1ce4-8516-43f2-94e3-2c76bdfa3433",
+      "name": "IF Date Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        420,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2717c994-8dd1-4a3e-b81a-4102599d7541",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "a4b9b277-2137-4d34-ac52-7221f098394d",
+      "name": "Get Service",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        -60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/services",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id,name,duration_minutes"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ \"eq.\" + $('Normalize Business').first().json.business_id }}"
+            },
+            {
+              "name": "name",
+              "value": "={{ \"eq.\" + $('Validate Format').first().json.service }}"
+            },
+            {
+              "name": "active",
+              "value": "eq.true"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "a2548996-5ca2-40d3-96f4-cc97ecab1f30",
+      "name": "Normalize Service",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// get_available_slots — Normalize Service\nconst items = $input.all();\nconst row = items[0] && items[0].json && items[0].json.id ? items[0].json : null;\n\nreturn [{\n  json: {\n    service_found: !!row,\n    service_id: row ? row.id : null,\n    service_name: row ? row.name : $('Validate Format').first().json.service,\n    duration_minutes: row ? row.duration_minutes : null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "03d8cda1-fc22-4f2f-ae26-877bd8ea079b",
+      "name": "IF Service Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "480fe138-487b-48f8-bd22-7c78b74fbe3b",
+              "leftValue": "={{ $json.service_found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "8e906c4b-b64f-490c-8232-361e72d0d2a5",
+      "name": "Respond 404 Unknown Service",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1300,
+        260
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"unknown_service\", \"message\": \"That is not a service this business offers. Do not invent one.\", \"service\": $json.service_name, \"slots\": [] } }}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    },
+    {
+      "id": "c05fa2ee-77c6-418d-9e77-8a40687fd7cb",
+      "name": "IF Calendar Configured",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1300,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7d067e92-6888-4af5-a774-1263de7cb157",
+              "leftValue": "={{ !!$('Normalize Settings').first().json.calendar_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "b90762f2-3b2f-433d-bbea-3aabcc1a817c",
+      "name": "Respond 502 Calendar Not Configured",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1520,
+        260
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"calendar_not_configured\", \"message\": \"This business has no calendar configured yet, so availability cannot be checked.\", \"slots\": [] } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "02ad3d94-a004-40ac-939b-a4cf3f6f376f",
+      "name": "Compute Search Window",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "// get_available_slots — Compute Search Window\nconst SEARCH_DAYS = 14;\nconst input = $('Resolve Date').first().json;\nconst start = DateTime.fromISO(input.search_from_iso, { zone: input.business_timezone });\nconst end = start.plus({ days: SEARCH_DAYS }).endOf('day');\n\nreturn [{\n  json: {\n    search_days: SEARCH_DAYS,\n    time_min: start.toUTC().toISO(),\n    time_max: end.toUTC().toISO(),\n  },\n}];"
+      }
+    },
+    {
+      "id": "7263174b-a96c-4378-b395-b120ca2a9a6c",
+      "name": "Get Busy Events",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [
+        1740,
+        -140
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Normalize Settings').first().json.calendar_id }}"
+        },
+        "resource": "event",
+        "operation": "getAll",
+        "returnAll": true,
+        "timeMin": "={{ $json.time_min }}",
+        "timeMax": "={{ $json.time_max }}",
+        "options": {
+          "singleEvents": true,
+          "orderBy": "startTime"
+        }
+      },
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_GOOGLE_CALENDAR_CREDENTIAL",
+          "name": "ReceptionFlow Google Calendar (placeholder)"
+        }
+      }
+    },
+    {
+      "id": "b02814a5-b3f8-4915-9e21-e001ee48bf05",
+      "name": "Respond 502 Calendar Unavailable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1960,
+        140
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"calendar_unavailable\", \"message\": \"Could not reach Google Calendar to check availability.\", \"slots\": [] } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "fa837df0-3af2-41a5-b7c1-d552a8dfdc40",
+      "name": "Compute Available Slots",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "function resolveHours(openingHours, weekdayNum) {\n  const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];\n  const dayName = DAY_NAMES[weekdayNum - 1];\n  const schedule = openingHours && Array.isArray(openingHours.schedule) ? openingHours.schedule : null;\n  if (!schedule || schedule.length === 0) {\n    // Not configured -- fall back rather than guess a business's real hours.\n    if (weekdayNum === 7) return { closed: true };\n    return { closed: false, open: '09:00', close: '19:00' };\n  }\n  const row = schedule.find((d) => d && d.day === dayName);\n  if (!row) return { closed: true };\n  return row.closed ? { closed: true } : { closed: false, open: row.open, close: row.close };\n}\n\n// get_available_slots — Compute Available Slots\n// Hours come from this business's own business_settings.opening_hours\n// (falling back to Mon-Sat 09:00-19:00, closed Sunday, if not configured).\nconst SLOT_STEP_MINUTES = 15;\nconst MIN_SLOTS = 2;\nconst MAX_SLOTS = 3;\nconst MAX_CANDIDATES = 500;\n\nconst dateInput = $('Resolve Date').first().json;\nconst settings = $('Normalize Settings').first().json;\nconst service = $('Normalize Service').first().json;\nconst searchDays = $('Compute Search Window').first().json.search_days;\n\nconst tz = dateInput.business_timezone;\nconst duration = Number(service.duration_minutes);\nconst searchFrom = DateTime.fromISO(dateInput.search_from_iso, { zone: tz });\nconst openingHours = settings.opening_hours;\n\nconst busy = $input\n  .all()\n  .map((item) => item.json)\n  .filter((e) => e && e.id && e.status !== 'cancelled' && e.transparency !== 'transparent')\n  .map((e) => {\n    const rawStart = e.start && (e.start.dateTime || e.start.date);\n    const rawEnd = e.end && (e.end.dateTime || e.end.date);\n    if (!rawStart || !rawEnd) return null;\n    return {\n      start: DateTime.fromISO(rawStart, { zone: tz }).toMillis(),\n      end: DateTime.fromISO(rawEnd, { zone: tz }).toMillis(),\n    };\n  })\n  .filter((b) => b && b.end > b.start);\n\nfunction overlapsBusy(startMs, endMs) {\n  return busy.some((b) => startMs < b.end && endMs > b.start);\n}\n\nfunction ceilToStep(dt) {\n  const stepMs = SLOT_STEP_MINUTES * 60 * 1000;\n  return DateTime.fromMillis(Math.ceil(dt.toMillis() / stepMs) * stepMs, { zone: tz });\n}\n\nconst candidates = [];\n\nfor (let dayOffset = 0; dayOffset <= searchDays; dayOffset++) {\n  const day = searchFrom.plus({ days: dayOffset }).startOf('day');\n  const hours = resolveHours(openingHours, day.weekday);\n  if (hours.closed) continue;\n\n  const [openH, openM] = hours.open.split(':').map(Number);\n  const [closeH, closeM] = hours.close.split(':').map(Number);\n  const open = day.set({ hour: openH, minute: openM, second: 0, millisecond: 0 });\n  const close = day.set({ hour: closeH, minute: closeM, second: 0, millisecond: 0 });\n\n  let cursor = dayOffset === 0 ? ceilToStep(searchFrom) : open;\n  if (cursor < open) cursor = open;\n\n  while (cursor.plus({ minutes: duration }) <= close) {\n    const slotEnd = cursor.plus({ minutes: duration });\n    if (!overlapsBusy(cursor.toMillis(), slotEnd.toMillis())) {\n      candidates.push({ start: cursor, end: slotEnd });\n    }\n    cursor = cursor.plus({ minutes: SLOT_STEP_MINUTES });\n  }\n\n  if (candidates.length >= MAX_CANDIDATES) break;\n}\n\nconst chosen = [];\nfor (const candidate of candidates) {\n  if (chosen.length === 0) {\n    chosen.push(candidate);\n  } else {\n    const last = chosen[chosen.length - 1];\n    if (candidate.start >= last.start.plus({ minutes: duration })) {\n      chosen.push(candidate);\n    }\n  }\n  if (chosen.length >= MAX_SLOTS) break;\n}\n\nconst slots = chosen.map((c) => ({\n  start: c.start.toISO(),\n  end: c.end.toISO(),\n  label: c.start.toFormat(\"cccc, LLLL d 'at' h:mm a\"),\n}));\n\nconst enough = slots.length >= MIN_SLOTS;\nconst searchedThrough = searchFrom.plus({ days: searchDays }).endOf('day');\nconst businessIdInput = $('Validate Format').first().json.business_id_input;\n\nreturn [{\n  json: {\n    enough_slots: enough,\n    response_ok: {\n      business_id: businessIdInput,\n      service: service.service_name,\n      duration_minutes: duration,\n      timezone: tz,\n      slot_count: slots.length,\n      slots,\n    },\n    response_error: {\n      error: 'no_slots_available',\n      message: 'No open ' + service.service_name + ' slots in the next ' + searchDays + ' days. Offer to take a message or transfer to a person.',\n      business_id: businessIdInput,\n      service: service.service_name,\n      duration_minutes: duration,\n      timezone: tz,\n      searched_from: searchFrom.toISO(),\n      searched_through: searchedThrough.toISO(),\n      slot_count: 0,\n      slots: [],\n    },\n  },\n}];"
+      }
+    },
+    {
+      "id": "f21ec678-92ff-4b83-9476-cbb44328ae4e",
+      "name": "IF Enough Slots",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2180,
+        -140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b9fd6a09-fdc9-41cd-a29a-d3ae3db7733f",
+              "leftValue": "={{ $json.enough_slots }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "f6760863-706d-496c-8a21-905d3bc245c9",
+      "name": "Respond 200 Slots",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2400,
+        -240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response_ok }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "b80b2379-3621-4f2a-b55c-c0c57c28407d",
+      "name": "Respond 409 No Slots",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2400,
+        -40
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response_error }}",
+        "options": {
+          "responseCode": 409
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Format": {
+      "main": [
+        [
+          {
+            "node": "IF Valid Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Valid Format": {
+      "main": [
+        [
+          {
+            "node": "Get Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400 Invalid Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business": {
+      "main": [
+        [
+          {
+            "node": "Normalize Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Business": {
+      "main": [
+        [
+          {
+            "node": "IF Business Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Business Found": {
+      "main": [
+        [
+          {
+            "node": "Get Business Settings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 404 Unknown Business",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business Settings": {
+      "main": [
+        [
+          {
+            "node": "Normalize Settings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Settings": {
+      "main": [
+        [
+          {
+            "node": "Resolve Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Date": {
+      "main": [
+        [
+          {
+            "node": "IF Date Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Date Valid": {
+      "main": [
+        [
+          {
+            "node": "Get Service",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400 Invalid Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Service": {
+      "main": [
+        [
+          {
+            "node": "Normalize Service",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Supabase Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Service": {
+      "main": [
+        [
+          {
+            "node": "IF Service Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Service Found": {
+      "main": [
+        [
+          {
+            "node": "IF Calendar Configured",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 404 Unknown Service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Calendar Configured": {
+      "main": [
+        [
+          {
+            "node": "Compute Search Window",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Calendar Not Configured",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Search Window": {
+      "main": [
+        [
+          {
+            "node": "Get Busy Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Busy Events": {
+      "main": [
+        [
+          {
+            "node": "Compute Available Slots",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502 Calendar Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Available Slots": {
+      "main": [
+        [
+          {
+            "node": "IF Enough Slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Enough Slots": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 Slots",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 409 No Slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "REPLACE_ON_IMPORT"
+  },
+  "tags": []
+}

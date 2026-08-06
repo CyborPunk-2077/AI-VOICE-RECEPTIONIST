@@ -1,0 +1,132 @@
+{
+  "_note": "Second example, deliberately a very different vertical from the clinic. Nothing about the agent code is appointment-shaped or clinic-shaped — this business sells memberships, has no 'bookable' slots at all, and still works from the same schema.",
+
+  "slug": "fitzone-gym",
+
+  "profile": {
+    "name": "FitZone Fitness Studio",
+    "type": "gym and fitness studio",
+    "tagline": "Strength, cardio, and group classes in Kothrud",
+    "city": "Pune",
+    "address": "2nd Floor, Sai Plaza, Kothrud, Pune, Maharashtra 411038",
+    "landmark": "above Reliance Fresh",
+    "publicPhone": "+912025551234",
+    "timezone": "Asia/Kolkata",
+    "currency": "INR",
+    "languages": ["hi", "en", "mr"]
+  },
+
+  "agent": {
+    "name": "Rohan",
+    "role": "front desk executive",
+    "persona": "energetic and encouraging, but never pushy about selling",
+    "greeting": "",
+    "maxCallMinutes": 5
+  },
+
+  "hours": {
+    "monday": { "open": "05:30", "close": "22:00" },
+    "tuesday": { "open": "05:30", "close": "22:00" },
+    "wednesday": { "open": "05:30", "close": "22:00" },
+    "thursday": { "open": "05:30", "close": "22:00" },
+    "friday": { "open": "05:30", "close": "22:00" },
+    "saturday": { "open": "06:00", "close": "21:00" },
+    "sunday": { "open": "07:00", "close": "13:00" },
+    "breaks": [],
+    "closedDates": []
+  },
+
+  "offerings": [
+    {
+      "name": "Monthly Membership",
+      "aliases": ["1 month", "monthly", "mahine ka"],
+      "price": 1800,
+      "priceType": "exact",
+      "bookable": false
+    },
+    {
+      "name": "Quarterly Membership",
+      "aliases": ["3 months", "three month"],
+      "price": 4500,
+      "priceType": "exact",
+      "bookable": false,
+      "notes": "Works out to 1500 a month."
+    },
+    {
+      "name": "Annual Membership",
+      "aliases": ["1 year", "yearly", "saal bhar"],
+      "price": 14000,
+      "priceType": "exact",
+      "bookable": false,
+      "notes": "Best value — includes two free personal training sessions."
+    },
+    {
+      "name": "Personal Training",
+      "aliases": ["pt", "trainer", "personal trainer"],
+      "price": 800,
+      "priceType": "from",
+      "bookable": false,
+      "notes": "Per session; packages of 10 or more get a discount the trainer will explain."
+    },
+    {
+      "name": "Free Trial Session",
+      "aliases": ["trial", "demo", "try karna hai"],
+      "price": 0,
+      "priceType": "free",
+      "durationMinutes": 60,
+      "bookable": true,
+      "notes": "One free session for first-time visitors. Carry a photo ID."
+    }
+  ],
+
+  "faqs": [
+    {
+      "q": "Do you have a women's only timing?",
+      "a": "Yes — the studio is women-only from 12 in the afternoon to 3 in the evening, Monday through Saturday."
+    },
+    {
+      "q": "Is there a joining or registration fee?",
+      "a": "There's a one-time registration fee of 500 rupees for new members. It's waived on the annual membership."
+    },
+    {
+      "q": "Do you have showers and lockers?",
+      "a": "Yes, we have changing rooms with showers and free lockers. Bring your own lock or buy one at the desk."
+    },
+    {
+      "q": "Can I freeze or pause my membership?",
+      "a": "Quarterly and annual members can pause once for up to a month. Just tell the front desk before you travel."
+    }
+  ],
+
+  "policies": {
+    "canQuotePrices": true,
+    "canBook": true,
+    "canCancel": false,
+    "neverDiscuss": [
+      "diet plans, nutrition advice, or supplements",
+      "medical or injury advice",
+      "any claim about how much weight someone will lose or how fast"
+    ],
+    "extraRules": [
+      "If a caller mentions an injury, heart condition, pregnancy, or surgery, tell them to check with their doctor first and offer to have a trainer call them back.",
+      "Do not negotiate on price or invent discounts. If someone pushes for a better rate, offer to have the manager call them back."
+    ]
+  },
+
+  "escalation": {
+    "transferNumber": "+919812345678",
+    "transferPolicy": "always",
+    "triggers": [
+      "caller asks for the manager or owner",
+      "caller wants to negotiate price or asks for a discount",
+      "complaint about staff, equipment, or cleanliness",
+      "anything about refunds or cancelling a membership"
+    ]
+  },
+
+  "capture": {
+    "askFor": ["name", "phone", "reason"],
+    "notifyEmail": "",
+    "notifyWhatsapp": ""
+  }
+}

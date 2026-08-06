@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# Captured caller data — names and phone numbers of real people.
+# Never commit this. The prototype store writes here (packages/agent-core/store.mjs).
+data/
+*.jsonl
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# Supabase
+.supabase/
+
+# n8n
+.n8n/
+n8n_data/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# TypeScript
+*.tsbuildinfo
+
+# Vercel
+.vercel/
